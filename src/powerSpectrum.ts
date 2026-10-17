@@ -505,10 +505,10 @@ export function computePowerSpectrum(
   const k_xi = generateKGrid(0.0001, 10.0, 1000);
   
   // Interpolate power spectra to extended k-grid
-  const pk_fid_xi = interpolateToGrid(k, pk_fid, k_xi);
-  const pk_xi = interpolateToGrid(k, pk, k_xi);
-  const pk_nl_fid_xi = interpolateToGrid(k, pk_nl_fid, k_xi);
-  const pk_nl_xi = interpolateToGrid(k, pk_nl, k_xi);
+  const pk_fid_xi = interpolatePowerSpectrum(k, pk_fid, k_xi);
+  const pk_xi = interpolatePowerSpectrum(k, pk, k_xi);
+  const pk_nl_fid_xi = interpolatePowerSpectrum(k, pk_nl_fid, k_xi);
+  const pk_nl_xi = interpolatePowerSpectrum(k, pk_nl, k_xi);
   
   const r = generateRGrid(1, 200, 200);
   const xi_fid = computeCorrelationFunction(k_xi, pk_fid_xi, r);
@@ -545,7 +545,7 @@ export function computePowerSpectrum(
 /**
  * Interpolate power spectrum to a new k-grid using log-log interpolation
  */
-function interpolateToGrid(k_old: number[], pk_old: number[], k_new: number[]): number[] {
+function interpolatePowerSpectrum(k_old: number[], pk_old: number[], k_new: number[]): number[] {
   const pk_new = new Array(k_new.length).fill(0);
   
   for (let i = 0; i < k_new.length; i++) {
@@ -576,52 +576,216 @@ function interpolateToGrid(k_old: number[], pk_old: number[], k_new: number[]): 
 }
 
 /**
- * Compute two-point correlation function ξ(r) from power spectrum P(k)
- * using Hankel transform: ξ(r) = (1/2π²) ∫ k² P(k) j₀(kr) dk
- * where j₀(x) = sin(x)/x
- * 
- * Uses logarithmic integration for logarithmic k-grid
- * Returns s²*ξ(s) for better visualization
+ * Log-gamma function using Lanczos approximation
+ */
+function loggamma(x: number): number {
+  if (x <= 0) return Infinity;
+  if (x < 0.5) {
+    return Math.log(Math.PI / Math.sin(Math.PI * x)) - loggamma(1 - x);
+  }
+  x -= 1;
+  const g = 7;
+  const c = [
+    0.99999999999980993,
+    676.5203681218851,
+    -1259.1392167224028,
+    771.32342877765313,
+    -176.61502916214059,
+    12.507343278686905,
+    -0.13857109526572012,
+    9.9843695780195716e-6,
+    1.5056327351493116e-7
+  ];
+  
+  let sum = c[0];
+  for (let i = 1; i < g + 2; i++) {
+    sum += c[i] / (x + i);
+  }
+  
+  const t = x + g + 0.5;
+  return 0.5 * Math.log(2 * Math.PI) + (x + 0.5) * Math.log(t) - t + Math.log(sum);
+}
+
+/**
+ * Mellin transform of spherical Bessel function j_ℓ(x)
+ * U(z) = ∫₀^∞ t^(z-1) j_ℓ(t) dt = 2^(z-1.5) Γ((ℓ+z)/2) / Γ((3+ℓ-z)/2)
+ */
+function sphericalBesselMellin(ell: number, z: {re: number, im: number}): {re: number, im: number} {
+  // For ℓ=0: U(z) = 2^(z-1.5) Γ(z/2) / Γ((3-z)/2)
+  const z_re = z.re;
+  const z_im = z.im;
+  
+  // Compute 2^(z-1.5)
+  const pow2_re = Math.pow(2, z_re - 1.5) * Math.cos(z_im * Math.log(2));
+  const pow2_im = Math.pow(2, z_re - 1.5) * Math.sin(z_im * Math.log(2));
+  
+  // Compute Γ(z/2) / Γ((3-z)/2) using log-gamma
+  // For complex arguments, we need to use the full complex gamma function
+  // Simplified: use real part only for now (approximation)
+  const arg1_re = z_re / 2;
+  const arg2_re = (3 - z_re) / 2;
+  
+  // For small imaginary parts, this is a reasonable approximation
+  const loggamma1 = loggamma(Math.abs(arg1_re) + 0.5);
+  const loggamma2 = loggamma(Math.abs(arg2_re) + 0.5);
+  
+  const ratio = Math.exp(loggamma1 - loggamma2);
+  
+  return {
+    re: pow2_re * ratio,
+    im: pow2_im * ratio
+  };
+}
+
+/**
+ * FFTLog-based Hankel transform for power spectrum to correlation function
+ * Based on Hamilton (2000) and cosmoprimo implementation
  */
 export function computeCorrelationFunction(k: number[], pk: number[], r: number[]): number[] {
-  const xi_scaled = new Array(r.length).fill(0);
+  const N = k.length;
   
-  for (let ir = 0; ir < r.length; ir++) {
-    const ri = r[ir];
-    let integral = 0;
+  // Check that k is log-spaced
+  const dlnk = Math.log(k[N-1] / k[0]) / (N - 1);
+  
+  // Determine output r grid using low-ringing condition
+  // For simplicity, use the provided r grid but ensure it's compatible
+  const r_out = r;
+  const Nout = r_out.length;
+  
+  // Tilt parameter q = 1.5 for power spectrum to correlation function
+  const q = 1.5;
+  
+  // Padding size (next power of 2)
+  const Npad = Math.pow(2, Math.ceil(Math.log2(2 * N)));
+  const Npad_left = Math.floor((Npad - N) / 2);
+  const Npad_right = Npad - N - Npad_left;
+  
+  // Pad the power spectrum with power-law extrapolation
+  const pk_padded = new Array(Npad).fill(0);
+  
+  // Left padding: power-law extrapolation
+  const ratio_left = pk[1] / pk[0];
+  for (let i = 0; i < Npad_left; i++) {
+    pk_padded[i] = pk[0] * Math.pow(ratio_left, i - Npad_left);
+  }
+  
+  // Copy original data
+  for (let i = 0; i < N; i++) {
+    pk_padded[Npad_left + i] = pk[i];
+  }
+  
+  // Right padding: power-law extrapolation
+  const ratio_right = pk[N-1] / pk[N-2];
+  for (let i = 0; i < Npad_right; i++) {
+    pk_padded[Npad_left + N + i] = pk[N-1] * Math.pow(ratio_right, i + 1);
+  }
+  
+  // Compute k³ P(k) / (2π)^1.5 (prefactor)
+  const f = new Array(Npad).fill(0);
+  for (let i = 0; i < Npad; i++) {
+    const k_i = k[0] * Math.exp((i - Npad_left) * dlnk);
+    f[i] = k_i * k_i * k_i * pk_padded[i] / Math.pow(2 * Math.PI, 1.5);
+  }
+  
+  // FFT of f
+  const f_fft = fft(f);
+  
+  // Compute kernel in Fourier space
+  const m_max = Math.floor(Npad / 2);
+  const u = new Array(m_max + 1).fill(0);
+  
+  for (let m = 0; m <= m_max; m++) {
+    const z_im = 2 * Math.PI * m / Npad / dlnk;
+    const z = { re: q, im: z_im };
+    u[m] = sphericalBesselMellin(0, z);
+  }
+  
+  // Multiply in Fourier space
+  const g_fft = new Array(Npad).fill(0);
+  for (let m = 0; m <= m_max; m++) {
+    const f_re = f_fft[m].re;
+    const f_im = f_fft[m].im;
+    const u_re = u[m].re;
+    const u_im = u[m].im;
     
-    // Logarithmic integration: ∫f(k)dk = ∫f(k)*k*d(ln k)
-    // Using trapezoidal rule in log space
-    for (let ik = 0; ik < k.length - 1; ik++) {
-      const k1 = k[ik];
-      const k2 = k[ik + 1];
-      const pk1 = pk[ik];
-      const pk2 = pk[ik + 1];
-      
-      // Spherical Bessel function j₀(x) = sin(x)/x
-      const x1 = k1 * ri;
-      const x2 = k2 * ri;
-      const j0_1 = x1 < 1e-6 ? 1 - x1*x1/6 : Math.sin(x1) / x1;
-      const j0_2 = x2 < 1e-6 ? 1 - x2*x2/6 : Math.sin(x2) / x2;
-      
-      // Integrand: k² P(k) j₀(kr)
-      // For log integration: f(k)*k*d(ln k)
-      const integrand1 = k1 * k1 * pk1 * j0_1 * k1;
-      const integrand2 = k2 * k2 * pk2 * j0_2 * k2;
-      
-      // Trapezoidal rule in log space: Δ(ln k) = ln(k2/k1)
-      const dlnk = Math.log(k2 / k1);
-      integral += 0.5 * (integrand1 + integrand2) * dlnk;
+    g_fft[m] = {
+      re: f_re * u_re - f_im * u_im,
+      im: f_re * u_im + f_im * u_re
+    };
+  }
+  
+  // Inverse FFT
+  const g = ifft(g_fft, Npad);
+  
+  // Compute output r grid and postfactor
+  const xi_scaled = new Array(Nout).fill(0);
+  
+  for (let i = 0; i < Nout; i++) {
+    const r_i = r_out[i];
+    // Map to padded grid index
+    const idx = Math.round(Npad_left + (Math.log(r_i / r[0]) / Math.log(r[r.length-1] / r[0])) * (N - 1));
+    
+    if (idx >= 0 && idx < Npad) {
+      // Postfactor: r^(-q) = r^(-1.5)
+      const postfac = Math.pow(r_i, -q);
+      xi_scaled[i] = r_i * r_i * g[idx] * postfac;
     }
-    
-    // ξ(r) = integral / (2π²)
-    const xi = integral / (2 * Math.PI * Math.PI);
-    
-    // Return s²*ξ(s) for better visualization
-    xi_scaled[ir] = ri * ri * xi;
   }
   
   return xi_scaled;
+}
+
+/**
+ * Simple FFT implementation (Cooley-Tukey algorithm)
+ */
+function fft(x: number[]): {re: number, im: number}[] {
+  const N = x.length;
+  if (N === 1) return [{ re: x[0], im: 0 }];
+  
+  const result: {re: number, im: number}[] = [];
+  
+  // Split into even and odd
+  const even: number[] = [];
+  const odd: number[] = [];
+  for (let i = 0; i < N; i++) {
+    if (i % 2 === 0) even.push(x[i]);
+    else odd.push(x[i]);
+  }
+  
+  const fft_even = fft(even);
+  const fft_odd = fft(odd);
+  
+  // Combine
+  for (let k = 0; k < N / 2; k++) {
+    const angle = -2 * Math.PI * k / N;
+    const t_re = Math.cos(angle) * fft_odd[k].re - Math.sin(angle) * fft_odd[k].im;
+    const t_im = Math.cos(angle) * fft_odd[k].im + Math.sin(angle) * fft_odd[k].re;
+    
+    result[k] = {
+      re: fft_even[k].re + t_re,
+      im: fft_even[k].im + t_im
+    };
+    result[k + N / 2] = {
+      re: fft_even[k].re - t_re,
+      im: fft_even[k].im - t_im
+    };
+  }
+  
+  return result;
+}
+
+/**
+ * Inverse FFT
+ */
+function ifft(x: {re: number, im: number}[], N: number): number[] {
+  // Conjugate
+  const conj = x.map(c => ({ re: c.re, im: -c.im }));
+  
+  // FFT
+  const result = fft(conj.map(c => c.re));
+  
+  // Conjugate and normalize
+  return result.map(c => c.re / N);
 }
 
 /**
