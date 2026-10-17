@@ -500,12 +500,21 @@ export function computePowerSpectrum(
   // sigma8 at z
   const sigma8_z = cosmo.sigma8 * Dz;
   
-  // Compute correlation functions
+  // Compute correlation functions using extended k-grid
+  // Need much higher k_max for accurate Hankel transform
+  const k_xi = generateKGrid(0.0001, 10.0, 1000);
+  
+  // Interpolate power spectra to extended k-grid
+  const pk_fid_xi = interpolateToGrid(k, pk_fid, k_xi);
+  const pk_xi = interpolateToGrid(k, pk, k_xi);
+  const pk_nl_fid_xi = interpolateToGrid(k, pk_nl_fid, k_xi);
+  const pk_nl_xi = interpolateToGrid(k, pk_nl, k_xi);
+  
   const r = generateRGrid(1, 200, 200);
-  const xi_fid = computeCorrelationFunction(k, pk_fid, r);
-  const xi = computeCorrelationFunction(k, pk, r);
-  const xi_nl_fid = computeCorrelationFunction(k, pk_nl_fid, r);
-  const xi_nl = computeCorrelationFunction(k, pk_nl, r);
+  const xi_fid = computeCorrelationFunction(k_xi, pk_fid_xi, r);
+  const xi = computeCorrelationFunction(k_xi, pk_xi, r);
+  const xi_nl_fid = computeCorrelationFunction(k_xi, pk_nl_fid_xi, r);
+  const xi_nl = computeCorrelationFunction(k_xi, pk_nl_xi, r);
   
   return {
     k,
@@ -534,20 +543,48 @@ export function computePowerSpectrum(
 }
 
 /**
+ * Interpolate power spectrum to a new k-grid using log-log interpolation
+ */
+function interpolateToGrid(k_old: number[], pk_old: number[], k_new: number[]): number[] {
+  const pk_new = new Array(k_new.length).fill(0);
+  
+  for (let i = 0; i < k_new.length; i++) {
+    const k = k_new[i];
+    
+    // Find bracketing indices
+    if (k <= k_old[0]) {
+      pk_new[i] = pk_old[0];
+    } else if (k >= k_old[k_old.length - 1]) {
+      pk_new[i] = pk_old[k_old.length - 1];
+    } else {
+      // Binary search for interval
+      let lo = 0, hi = k_old.length - 1;
+      while (hi - lo > 1) {
+        const mid = (lo + hi) >> 1;
+        if (k_old[mid] <= k) lo = mid;
+        else hi = mid;
+      }
+      
+      // Log-log interpolation
+      const t = (Math.log(k) - Math.log(k_old[lo])) / (Math.log(k_old[hi]) - Math.log(k_old[lo]));
+      const log_pk = Math.log(pk_old[lo]) + t * (Math.log(pk_old[hi]) - Math.log(pk_old[lo]));
+      pk_new[i] = Math.exp(log_pk);
+    }
+  }
+  
+  return pk_new;
+}
+
+/**
  * Compute two-point correlation function ξ(r) from power spectrum P(k)
  * using Hankel transform: ξ(r) = (1/2π²) ∫ k² P(k) j₀(kr) dk
  * where j₀(x) = sin(x)/x
  * 
- * Uses logarithmic integration for logarithmic k-grid and adds regularization
+ * Uses logarithmic integration for logarithmic k-grid
  * Returns s²*ξ(s) for better visualization
  */
 export function computeCorrelationFunction(k: number[], pk: number[], r: number[]): number[] {
   const xi_scaled = new Array(r.length).fill(0);
-  
-  // Regularization: Gaussian window function to damp high-k oscillations
-  // This helps with convergence of the oscillatory integral
-  const k_max = k[k.length - 1];
-  const sigma_window = 0.5 * k_max; // Window scale
   
   for (let ir = 0; ir < r.length; ir++) {
     const ri = r[ir];
@@ -567,14 +604,10 @@ export function computeCorrelationFunction(k: number[], pk: number[], r: number[
       const j0_1 = x1 < 1e-6 ? 1 - x1*x1/6 : Math.sin(x1) / x1;
       const j0_2 = x2 < 1e-6 ? 1 - x2*x2/6 : Math.sin(x2) / x2;
       
-      // Regularization window function (Gaussian)
-      const window1 = Math.exp(-0.5 * (k1 / sigma_window) ** 2);
-      const window2 = Math.exp(-0.5 * (k2 / sigma_window) ** 2);
-      
-      // Integrand: k² P(k) j₀(kr) * window(k)
+      // Integrand: k² P(k) j₀(kr)
       // For log integration: f(k)*k*d(ln k)
-      const integrand1 = k1 * k1 * pk1 * j0_1 * window1 * k1;
-      const integrand2 = k2 * k2 * pk2 * j0_2 * window2 * k2;
+      const integrand1 = k1 * k1 * pk1 * j0_1 * k1;
+      const integrand2 = k2 * k2 * pk2 * j0_2 * k2;
       
       // Trapezoidal rule in log space: Δ(ln k) = ln(k2/k1)
       const dlnk = Math.log(k2 / k1);
