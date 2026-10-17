@@ -546,7 +546,7 @@ export default function App() {
           <div className="bg-gray-800 rounded-xl border border-gray-700 p-4 mb-4 shadow-xl">
             <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-green-500"></span>
-              Tree-Level Bispectrum B(k₁, k₂, k₃)
+              Tree-Level Bispectrum k₁k₂k₃·B(k₁, k₂, k₃)
               <span className="text-xs text-gray-500">(Isosceles right triangle: k₁=k₂, k₃=k₁√2)</span>
             </h3>
             <ResponsiveContainer width="100%" height={350}>
@@ -566,7 +566,7 @@ export default function App() {
                   domain={['auto', 'auto']}
                   stroke="#6B7280"
                   tickFormatter={(v) => v.toExponential(1)}
-                  label={{ value: 'B(k₁, k₁, k₁√2) [(Mpc/h)⁶]', angle: -90, position: 'insideLeft', offset: -5, style: { fill: '#9CA3AF', fontSize: 11 } }}
+                  label={{ value: 'k₁k₂k₃·B [(Mpc/h)⁹]', angle: -90, position: 'insideLeft', offset: -5, style: { fill: '#9CA3AF', fontSize: 11 } }}
                 />
                 <Tooltip
                   contentStyle={{ backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '8px', fontSize: 12 }}
@@ -574,12 +574,12 @@ export default function App() {
                   formatter={(value: number, name: string) => [value.toExponential(3), name]}
                 />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Line type="monotone" dataKey="bispectrum_fid" name="B_fid(k₁)" stroke="#60A5FA" strokeWidth={2.5} dot={false} />
-                <Line type="monotone" dataKey="bispectrum" name="B(k₁) [modified]" stroke="#F87171" strokeWidth={2.5} dot={false} />
+                <Line type="monotone" dataKey="bispectrum_fid" name="k₁k₂k₃·B_fid(k₁)" stroke="#60A5FA" strokeWidth={2.5} dot={false} />
+                <Line type="monotone" dataKey="bispectrum" name="k₁k₂k₃·B(k₁) [modified]" stroke="#F87171" strokeWidth={2.5} dot={false} />
               </LineChart>
             </ResponsiveContainer>
             <p className="text-xs text-gray-500 mt-2">
-              Tree-level bispectrum from second-order perturbation theory. Shows the leading-order three-point correlation in Fourier space.
+              Tree-level bispectrum from second-order perturbation theory, scaled by k₁k₂k₃. Shows the leading-order three-point correlation in Fourier space.
             </p>
           </div>
 

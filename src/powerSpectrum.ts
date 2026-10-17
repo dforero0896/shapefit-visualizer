@@ -503,9 +503,9 @@ export function computePowerSpectrum(
   // sigma8 at z
   const sigma8_z = cosmo.sigma8 * Dz;
   
-  // Compute correlation functions using extended k-grid
-  // Need much higher k_max for accurate Hankel transform
-  const k_xi = generateKGrid(0.0001, 10.0, 1000);
+  // Compute correlation functions using very extended k-grid
+  // Need very small k_min and very large k_max with fine sampling for accurate integration
+  const k_xi = generateKGrid(1e-6, 1000.0, 10000);
   
   // Interpolate power spectra to extended k-grid
   const pk_fid_xi = interpolatePowerSpectrum(k, pk_fid, k_xi);
@@ -520,9 +520,15 @@ export function computePowerSpectrum(
   const xi_nl = computeCorrelationFunction(k_xi, pk_nl_xi, r);
   
   // Compute tree-level bispectrum for isosceles right triangle (k1, k1, k1*√2)
+  // Scale by k1*k2*k3 = k1*k1*(k1*sqrt(2)) = k1^3 * sqrt(2)
   const k_bispectrum = generateKGrid(0.01, 0.3, 100);
-  const bispectrum_fid = computeTreeLevelBispectrum(k_bispectrum, pk_fid, 1.0, Math.sqrt(2));
-  const bispectrum = computeTreeLevelBispectrum(k_bispectrum, pk, 1.0, Math.sqrt(2));
+  const bispectrum_fid_raw = computeTreeLevelBispectrum(k_bispectrum, pk_fid, 1.0, Math.sqrt(2));
+  const bispectrum_raw = computeTreeLevelBispectrum(k_bispectrum, pk, 1.0, Math.sqrt(2));
+  
+  // Scale by k1*k2*k3
+  const sqrt2 = Math.sqrt(2);
+  const bispectrum_fid = k_bispectrum.map((k1, i) => bispectrum_fid_raw[i] * k1 * k1 * k1 * sqrt2);
+  const bispectrum = k_bispectrum.map((k1, i) => bispectrum_raw[i] * k1 * k1 * k1 * sqrt2);
   
   return {
     k,
