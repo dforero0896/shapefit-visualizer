@@ -456,8 +456,8 @@ export default function App() {
           <div className="bg-gray-800 rounded-xl border border-gray-700 p-4 mb-4 shadow-xl">
             <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-purple-500"></span>
-              Two-Point Correlation Function ξ(r)
-              <span className="text-xs text-gray-500">(Hankel transform of P(k))</span>
+              Two-Point Correlation Function s²ξ(s)
+              <span className="text-xs text-gray-500">(Hankel transform of P(k), regularized)</span>
             </h3>
             <ResponsiveContainer width="100%" height={350}>
               <LineChart data={correlationData} margin={{ top: 10, right: 30, left: 20, bottom: 20 }}>
@@ -469,29 +469,29 @@ export default function App() {
                   ticks={[1, 2, 5, 10, 20, 50, 100, 200]}
                   tickFormatter={(v) => v.toString()}
                   stroke="#6B7280"
-                  label={{ value: 'r [Mpc/h]', position: 'bottom', offset: 0, style: { fill: '#9CA3AF', fontSize: 12 } }}
+                  label={{ value: 's [Mpc/h]', position: 'bottom', offset: 0, style: { fill: '#9CA3AF', fontSize: 12 } }}
                 />
                 <YAxis
-                  scale="log"
+                  scale="linear"
                   domain={['auto', 'auto']}
                   stroke="#6B7280"
-                  tickFormatter={(v) => v.toExponential(1)}
-                  label={{ value: 'ξ(r)', angle: -90, position: 'insideLeft', offset: -5, style: { fill: '#9CA3AF', fontSize: 11 } }}
+                  tickFormatter={(v) => v.toFixed(1)}
+                  label={{ value: 's²ξ(s) [(Mpc/h)²]', angle: -90, position: 'insideLeft', offset: -5, style: { fill: '#9CA3AF', fontSize: 11 } }}
                 />
                 <Tooltip
                   contentStyle={{ backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '8px', fontSize: 12 }}
-                  labelFormatter={(v) => `r = ${(v as number).toFixed(1)} Mpc/h`}
-                  formatter={(value: number, name: string) => [value.toExponential(3), name]}
+                  labelFormatter={(v) => `s = ${(v as number).toFixed(1)} Mpc/h`}
+                  formatter={(value: number, name: string) => [value.toFixed(3), name]}
                 />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Line type="monotone" dataKey="xi_fid" name="ξ_fid(r)" stroke="#60A5FA" strokeWidth={2.5} dot={false} />
-                <Line type="monotone" dataKey="xi" name="ξ(r) [modified]" stroke="#F87171" strokeWidth={2.5} dot={false} />
-                <Line type="monotone" dataKey="xi_nl_fid" name="ξ_nl,fid(r)" stroke="#60A5FA" strokeWidth={1.5} strokeDasharray="6 3" dot={false} />
-                <Line type="monotone" dataKey="xi_nl" name="ξ_nl(r) [modified]" stroke="#F87171" strokeWidth={1.5} strokeDasharray="6 3" dot={false} />
+                <Line type="monotone" dataKey="xi_fid" name="s²ξ_fid(s)" stroke="#60A5FA" strokeWidth={2.5} dot={false} />
+                <Line type="monotone" dataKey="xi" name="s²ξ(s) [modified]" stroke="#F87171" strokeWidth={2.5} dot={false} />
+                <Line type="monotone" dataKey="xi_nl_fid" name="s²ξ_nl,fid(s)" stroke="#60A5FA" strokeWidth={1.5} strokeDasharray="6 3" dot={false} />
+                <Line type="monotone" dataKey="xi_nl" name="s²ξ_nl(s) [modified]" stroke="#F87171" strokeWidth={1.5} strokeDasharray="6 3" dot={false} />
               </LineChart>
             </ResponsiveContainer>
             <p className="text-xs text-gray-500 mt-2">
-              The correlation function ξ(r) is the Fourier transform of P(k). The BAO peak appears at r ≈ 100 Mpc/h.
+              The scaled correlation function s²ξ(s) highlights the BAO peak at s ≈ 100 Mpc/h. Regularized with Gaussian window to improve convergence.
             </p>
           </div>
 
@@ -499,7 +499,7 @@ export default function App() {
           <div className="bg-gray-800 rounded-xl border border-gray-700 p-4 mb-4 shadow-xl">
             <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-pink-500"></span>
-              Correlation Function Ratio: ξ(r) / ξ_fid(r)
+              Correlation Function Ratio: s²ξ(s) / s²ξ_fid(s)
             </h3>
             <ResponsiveContainer width="100%" height={250}>
               <LineChart data={correlationRatioData} margin={{ top: 10, right: 30, left: 20, bottom: 20 }}>
@@ -511,7 +511,7 @@ export default function App() {
                   ticks={[1, 2, 5, 10, 20, 50, 100, 200]}
                   tickFormatter={(v) => v.toString()}
                   stroke="#6B7280"
-                  label={{ value: 'r [Mpc/h]', position: 'bottom', offset: 0, style: { fill: '#9CA3AF', fontSize: 12 } }}
+                  label={{ value: 's [Mpc/h]', position: 'bottom', offset: 0, style: { fill: '#9CA3AF', fontSize: 12 } }}
                 />
                 <YAxis
                   domain={[0.5, 1.5]}
@@ -521,12 +521,12 @@ export default function App() {
                 />
                 <Tooltip
                   contentStyle={{ backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '8px', fontSize: 12 }}
-                  labelFormatter={(v) => `r = ${(v as number).toFixed(1)} Mpc/h`}
-                  formatter={(value: number) => [value.toFixed(4), 'ξ/ξ_fid']}
+                  labelFormatter={(v) => `s = ${(v as number).toFixed(1)} Mpc/h`}
+                  formatter={(value: number) => [value.toFixed(4), 's²ξ(s)/s²ξ_fid(s)']}
                 />
                 <ReferenceLine y={1} stroke="#4B5563" strokeDasharray="3 3" strokeWidth={1.5} />
-                <Line type="monotone" dataKey="ratio" name="ξ(r)/ξ_fid(r)" stroke="#F87171" strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="ratio_nl" name="ξ_nl(r)/ξ_nl,fid(r)" stroke="#F97316" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="ratio" name="s²ξ(s)/s²ξ_fid(s)" stroke="#F87171" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="ratio_nl" name="s²ξ_nl(s)/s²ξ_nl,fid(s)" stroke="#F97316" strokeWidth={2} dot={false} />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -592,7 +592,7 @@ export default function App() {
                 <li><b>Linear:</b> Eisenstein & Hu (1998) zero-baryon transfer function + Syren (Bartlett et al. 2023) correction for BAO wiggles</li>
                 <li><b>Nonlinear:</b> SYREN-HALOFIT (Bartlett et al. 2024) — symbolic regression-enhanced halofit model</li>
                 <li><b>ShapeFit template</b> from desilike/shapefit-prime to parameterize spectral modifications</li>
-                <li><b>Correlation function:</b> Hankel transform ξ(r) = (1/2π²) ∫ k² P(k) j₀(kr) dk computed via numerical integration</li>
+                <li><b>Correlation function:</b> Hankel transform s²ξ(s) = s²/(2π²) ∫ k² P(k) j₀(ks) dk with logarithmic integration and Gaussian window regularization</li>
               </ul>
               <p>
                 The ShapeFit approach separates P(k) into a smooth no-wiggle component and a wiggle factor W(k) = P_fid/P_now,fid,

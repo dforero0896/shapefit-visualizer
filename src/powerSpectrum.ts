@@ -537,15 +537,24 @@ export function computePowerSpectrum(
  * Compute two-point correlation function ξ(r) from power spectrum P(k)
  * using Hankel transform: ξ(r) = (1/2π²) ∫ k² P(k) j₀(kr) dk
  * where j₀(x) = sin(x)/x
+ * 
+ * Uses logarithmic integration for logarithmic k-grid and adds regularization
+ * Returns s²*ξ(s) for better visualization
  */
 export function computeCorrelationFunction(k: number[], pk: number[], r: number[]): number[] {
-  const xi = new Array(r.length).fill(0);
+  const xi_scaled = new Array(r.length).fill(0);
+  
+  // Regularization: Gaussian window function to damp high-k oscillations
+  // This helps with convergence of the oscillatory integral
+  const k_max = k[k.length - 1];
+  const sigma_window = 0.5 * k_max; // Window scale
   
   for (let ir = 0; ir < r.length; ir++) {
     const ri = r[ir];
     let integral = 0;
     
-    // Trapezoidal integration
+    // Logarithmic integration: ∫f(k)dk = ∫f(k)*k*d(ln k)
+    // Using trapezoidal rule in log space
     for (let ik = 0; ik < k.length - 1; ik++) {
       const k1 = k[ik];
       const k2 = k[ik + 1];
@@ -558,17 +567,28 @@ export function computeCorrelationFunction(k: number[], pk: number[], r: number[
       const j0_1 = x1 < 1e-6 ? 1 - x1*x1/6 : Math.sin(x1) / x1;
       const j0_2 = x2 < 1e-6 ? 1 - x2*x2/6 : Math.sin(x2) / x2;
       
-      // Integrand: k² P(k) j₀(kr)
-      const integrand1 = k1 * k1 * pk1 * j0_1;
-      const integrand2 = k2 * k2 * pk2 * j0_2;
+      // Regularization window function (Gaussian)
+      const window1 = Math.exp(-0.5 * (k1 / sigma_window) ** 2);
+      const window2 = Math.exp(-0.5 * (k2 / sigma_window) ** 2);
       
-      integral += 0.5 * (integrand1 + integrand2) * (k2 - k1);
+      // Integrand: k² P(k) j₀(kr) * window(k)
+      // For log integration: f(k)*k*d(ln k)
+      const integrand1 = k1 * k1 * pk1 * j0_1 * window1 * k1;
+      const integrand2 = k2 * k2 * pk2 * j0_2 * window2 * k2;
+      
+      // Trapezoidal rule in log space: Δ(ln k) = ln(k2/k1)
+      const dlnk = Math.log(k2 / k1);
+      integral += 0.5 * (integrand1 + integrand2) * dlnk;
     }
     
-    xi[ir] = integral / (2 * Math.PI * Math.PI);
+    // ξ(r) = integral / (2π²)
+    const xi = integral / (2 * Math.PI * Math.PI);
+    
+    // Return s²*ξ(s) for better visualization
+    xi_scaled[ir] = ri * ri * xi;
   }
   
-  return xi;
+  return xi_scaled;
 }
 
 /**
