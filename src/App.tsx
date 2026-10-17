@@ -89,6 +89,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('cosmo');
   const [plotMode, setPlotMode] = useState<'pk' | 'kpk' | 'dkpk'>('dkpk');
   const [showDESI, setShowDESI] = useState(true);
+  const [useNonlinear, setUseNonlinear] = useState(false);
 
   const result = useMemo(() => {
     return computePowerSpectrum(cosmo, shapefit, redshift);
@@ -104,20 +105,34 @@ export default function App() {
 
   // Prepare chart data — focus on k = 0.02 to 0.5
   const chartData = useMemo(() => {
-    const { k, pk_fid, pknow_fid, pk, pknow, kPk_fid, kPk, kPk3_fid, kPk3 } = result;
+    const { k, pk_fid, pknow_fid, pk, pknow, pk_nl_fid, pk_nl, 
+            kPk_fid, kPk, kPk_nl_fid, kPk_nl, kPk3_fid, kPk3, kPk3_nl_fid, kPk3_nl } = result;
     
     return k.map((ki, i) => {
       let y_fid: number, y_mod: number;
       
-      if (plotMode === 'pk') {
-        y_fid = pk_fid[i];
-        y_mod = pk[i];
-      } else if (plotMode === 'kpk') {
-        y_fid = kPk_fid[i];
-        y_mod = kPk[i];
+      if (useNonlinear) {
+        if (plotMode === 'pk') {
+          y_fid = pk_nl_fid[i];
+          y_mod = pk_nl[i];
+        } else if (plotMode === 'kpk') {
+          y_fid = kPk_nl_fid[i];
+          y_mod = kPk_nl[i];
+        } else {
+          y_fid = kPk3_nl_fid[i];
+          y_mod = kPk3_nl[i];
+        }
       } else {
-        y_fid = kPk3_fid[i];
-        y_mod = kPk3[i];
+        if (plotMode === 'pk') {
+          y_fid = pk_fid[i];
+          y_mod = pk[i];
+        } else if (plotMode === 'kpk') {
+          y_fid = kPk_fid[i];
+          y_mod = kPk[i];
+        } else {
+          y_fid = kPk3_fid[i];
+          y_mod = kPk3[i];
+        }
       }
       
       return {
@@ -134,7 +149,7 @@ export default function App() {
         ratio: y_mod / y_fid,
       };
     });
-  }, [result, plotMode]);
+  }, [result, plotMode, useNonlinear]);
 
   const ratioData = useMemo(() => {
     return chartData.map(d => ({
@@ -143,9 +158,10 @@ export default function App() {
     }));
   }, [chartData]);
 
-  const plotLabel = plotMode === 'pk' ? 'P(k) [(Mpc/h)³]' :
-                    plotMode === 'kpk' ? 'k·P(k) [(Mpc/h)²]' :
-                    'Δ²(k) = k³P(k)/(2π²)';
+  const plotLabel = (useNonlinear ? 'Nonlinear ' : 'Linear ') + 
+                    (plotMode === 'pk' ? 'P(k) [(Mpc/h)³]' :
+                     plotMode === 'kpk' ? 'k·P(k) [(Mpc/h)²]' :
+                     'Δ²(k) = k³P(k)/(2π²)');
 
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100">
@@ -157,7 +173,7 @@ export default function App() {
             Linear Power Spectrum Explorer
           </h1>
           <p className="text-xs sm:text-sm text-gray-400 mt-0.5">
-            Eisenstein & Hu (1998) + Syren (Bartlett et al. 2023) | ShapeFit template from{' '}
+            Linear (EH98 + Syren) & Nonlinear (SYREN-HALOFIT) | ShapeFit template from{' '}
             <a href="https://github.com/dforero0896/desilike/tree/shapefit-prime" target="_blank" rel="noopener" className="text-blue-400 hover:underline">
               desilike/shapefit-prime
             </a>
@@ -326,6 +342,31 @@ export default function App() {
                 </button>
               ))}
             </div>
+            <div className="ml-auto flex items-center gap-2">
+              <span className="text-sm text-gray-400">Spectrum:</span>
+              <div className="flex gap-1">
+                <button
+                  onClick={() => setUseNonlinear(false)}
+                  className={`px-3 py-1.5 text-sm rounded-md transition-all ${
+                    !useNonlinear
+                      ? 'bg-green-600 text-white shadow-lg shadow-green-600/20'
+                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                  }`}
+                >
+                  Linear
+                </button>
+                <button
+                  onClick={() => setUseNonlinear(true)}
+                  className={`px-3 py-1.5 text-sm rounded-md transition-all ${
+                    useNonlinear
+                      ? 'bg-orange-600 text-white shadow-lg shadow-orange-600/20'
+                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                  }`}
+                >
+                  Nonlinear (SYREN-HALOFIT)
+                </button>
+              </div>
+            </div>
           </div>
 
           {/* Main Power Spectrum Plot */}
@@ -441,11 +482,11 @@ export default function App() {
             <h4 className="text-sm font-semibold text-gray-300 mb-2">About</h4>
             <div className="text-xs text-gray-400 space-y-2">
               <p>
-                This app computes the linear matter power spectrum P(k) using:
+                This app computes the matter power spectrum P(k) using:
               </p>
               <ul className="list-disc list-inside space-y-1 ml-2">
-                <li><b>Eisenstein & Hu (1998)</b> zero-baryon transfer function for the smooth (no-wiggle) component</li>
-                <li><b>Syren</b> (Bartlett et al. 2023) symbolic emulator correction exp(logF) for BAO wiggles</li>
+                <li><b>Linear:</b> Eisenstein & Hu (1998) zero-baryon transfer function + Syren (Bartlett et al. 2023) correction for BAO wiggles</li>
+                <li><b>Nonlinear:</b> SYREN-HALOFIT (Bartlett et al. 2024) — symbolic regression-enhanced halofit model</li>
                 <li><b>ShapeFit template</b> from desilike/shapefit-prime to parameterize spectral modifications</li>
               </ul>
               <p>
@@ -453,9 +494,14 @@ export default function App() {
                 each controlled by physically-motivated parameters (δm, δn, δγ, etc.). This enables efficient extraction of 
                 cosmological information from galaxy clustering without running a Boltzmann solver at each step.
               </p>
+              <p>
+                The DESI DR1 data points (Cereskaite et al. 2025) represent the reconstructed <b>nonlinear</b> matter power spectrum 
+                at z=0 from galaxy clustering measurements, which is why they should be compared with the nonlinear theory curves.
+              </p>
               <p className="text-gray-500">
                 References: Eisenstein & Hu (1998) ApJ 511, 5 | Bartlett et al. (2023) arXiv:2311.15865 | 
-                Brieden et al. (2021) arXiv:2106.07641
+                Bartlett et al. (2024) arXiv:2402.17492 | Brieden et al. (2021) arXiv:2106.07641 | 
+                Cereskaite et al. (2025) arXiv:2507.16590
               </p>
             </div>
           </div>
@@ -535,7 +581,7 @@ function DESIDataPanel({ plotMode, plotLabel }: { plotMode: string; plotLabel: s
   return (
     <div className="mt-3 border-t border-gray-700 pt-3">
       <h4 className="text-xs font-semibold text-gray-400 mb-2">
-        DESI DR1 + Planck CMB data (Cereskaite et al. 2025, arXiv:2507.16590) — z=0 reconstruction
+        DESI DR1 + Planck CMB data (Cereskaite et al. 2025, arXiv:2507.16590) — z=0 nonlinear reconstruction
       </h4>
       <ResponsiveContainer width="100%" height={220}>
         <ScatterChart margin={{ top: 10, right: 30, left: 20, bottom: 20 }}>

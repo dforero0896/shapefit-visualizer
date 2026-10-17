@@ -295,6 +295,129 @@ function interpLog(x: number[], y: number[], x_target: number): number {
   return Math.exp(Math.log(y[lo]) + t * (Math.log(y[hi]) - Math.log(y[lo])));
 }
 
+// ─── SYREN-HALOFIT Nonlinear Power Spectrum ─────────────────────────────────
+
+/**
+ * Compute nonlinear power spectrum using SYREN-HALOFIT (Bartlett et al. 2024)
+ * Based on arXiv:2402.17492
+ */
+function computeNonlinearPk(k: number[], cosmo: CosmoParams, z: number): number[] {
+  const a = 1 / (1 + z);
+  
+  // Compute halofit parameters
+  const ksigma = ksigma_emulated(cosmo.sigma8, cosmo.omega_m, cosmo.omega_b, cosmo.h, cosmo.n_s, a);
+  const neff = neff_emulated(cosmo.sigma8, cosmo.omega_m, cosmo.omega_b, cosmo.h, cosmo.n_s, a);
+  const C = C_emulated(cosmo.sigma8, cosmo.omega_m, cosmo.omega_b, cosmo.h, cosmo.n_s, a);
+  
+  // Get linear P(k) at redshift z
+  const pk_lin_z0 = computeLinearPk(k, cosmo);
+  const Dz = growthD(z, cosmo.omega_m);
+  const pk_lin_z = pk_lin_z0.map(p => p * Dz * Dz);
+  
+  // Bartlett et al. 2024 halofit parameters
+  const pars = [1.5358, 2.8533, 2.3692, 0.9916, 0.2244, 0.5862, -0.565, 0.5871,
+                0.5757, -1.505, 0.3913, 2.0252, 0.7971, 0.5989, 0.2216, -0.001,
+                1.1771, 5.2082, 3.7324, -0.0158, -0.0972, 0.155, 6.1043, 1.3408,
+                -0.2138, -5.325, 1.9967, -0.7176, 0.3108, 1.2477, 0.4018, -0.3837];
+  
+  const y = k.map(ki => ki / ksigma);
+  
+  // 1-halo term parameters
+  const an = Math.pow(10, pars[0] + pars[1] * neff + pars[2] * neff**2 + pars[3] * neff**3 + pars[4] * neff**4 - pars[5] * C);
+  const bn = Math.pow(10, pars[6] + pars[7] * neff + pars[8] * neff**2 + pars[9] * C);
+  const cn = Math.pow(10, pars[10] + pars[11] * neff + pars[12] * neff**2 + pars[13] * C);
+  const gamma = pars[14] + pars[15] * neff + pars[16] * C;
+  const nu = Math.pow(10, pars[17] + pars[18] * neff);
+  
+  const Omz = cosmo.omega_m / (a**3) / (cosmo.omega_m / (a**3) + 1 - cosmo.omega_m);
+  const f1 = Math.pow(Omz, pars[19]);
+  const f2 = Math.pow(Omz, pars[20]);
+  const f3 = Math.pow(Omz, pars[21]);
+  
+  // 2-halo term parameters
+  const alpha = Math.abs(pars[22] + pars[23] * neff + pars[24] * neff**2 + pars[25] * C);
+  const beta = pars[26] + pars[27] * neff + pars[28] * neff**2 + pars[29] * neff**3 + pars[30] * neff**4 + pars[31] * C;
+  
+  // Compute 1-halo and 2-halo terms
+  const pk_nl = k.map((ki, i) => {
+    const yi = y[i];
+    
+    // 1-halo term
+    const deltaH2 = an * Math.pow(yi, 3 * f1) / (1 + bn * Math.pow(yi, f2) + Math.pow(cn * f3 * yi, 3 - gamma));
+    const deltaH2_final = deltaH2 / (1 + nu / (yi**2));
+    const ph = deltaH2_final * (2 * Math.PI**2) / (ki**3);
+    
+    // 2-halo term
+    const deltaL2 = (ki**3) * pk_lin_z[i] / (2 * Math.PI**2);
+    const pq = pk_lin_z[i] * Math.pow(1 + deltaL2, beta) / (1 + alpha * deltaL2) * Math.exp(-yi/4 - (yi**2)/8);
+    
+    // Total
+    let p_nl = ph + pq;
+    
+    // Apply SYREN correction (1 + A)
+    const A = A_emulated(ki, cosmo.sigma8, cosmo.omega_m, cosmo.omega_b, cosmo.h, cosmo.n_s, a, ksigma, neff, C);
+    p_nl *= (1 + A);
+    
+    return p_nl;
+  });
+  
+  return pk_nl;
+}
+
+/**
+ * Emulate nonlinear scale k_sigma (Bartlett et al. 2024)
+ */
+function ksigma_emulated(sigma8: number, Om: number, Ob: number, h: number, ns: number, a: number): number {
+  const c = [4.35761588, 0.83576576, 0.43023897, 20.107738, 0.259285, 0.573205,
+             1.680897, 20.043272, 0.425699, 0.39078063];
+  const ksigma = (
+    c[0] * (a * c[1] * (c[2] - sigma8) +
+            Math.pow(c[3] * a, -c[4] * a - c[5] * ns) *
+            (c[6] * Ob + Math.pow(c[7] * Om, -c[8] * h))) /
+    (sigma8 * (a + c[9] * ns))
+  );
+  return Math.exp(ksigma);
+}
+
+/**
+ * Emulate effective spectral index n_eff (Bartlett et al. 2024)
+ */
+function neff_emulated(sigma8: number, Om: number, Ob: number, h: number, ns: number, a: number): number {
+  const theta = [1.65139294, 4.88150280, 0.51249900, 0.14884800,
+                 15.6499400, 0.23930700, 0.13463100];
+  return (theta[0] * ns - theta[1]) * (theta[2] * Ob - theta[3] * h +
+         Math.pow(theta[4] * a, -theta[5] * Om - theta[6] * sigma8));
+}
+
+/**
+ * Emulate curvature C (Bartlett et al. 2024)
+ */
+function C_emulated(sigma8: number, Om: number, Ob: number, h: number, ns: number, a: number): number {
+  const b = [0.335853, 1.42946178682748, 0.115256188211481, 0.057211, 48.072159, 0.194058,
+             1.176006, 1.015136, 0.235398, 0.359587, 2.389843, 0.356875, 0.443138];
+  return (b[0] * sigma8 - b[1] * Math.sqrt(b[2] * ns + sigma8 * (b[3] * h +
+         Math.pow(b[4] * Om, b[5] * a) - b[6])) * (b[7] * Ob + b[8] * a + b[9] * sigma8 -
+         Math.pow(b[10] * h, b[11] * Om)) - b[12]);
+}
+
+/**
+ * SYREN correction factor A (Bartlett et al. 2024)
+ */
+function A_emulated(k: number, sigma8: number, Om: number, Ob: number, h: number, ns: number, a: number,
+                    ksigma: number, neff: number, C: number): number {
+  const y = k / ksigma;
+  
+  const d = [0.0, 0.2011, 1.2983, 16.8733, 3.6428, 1.0622, 0.1023, 2.2204,
+             0.0105, 0.487, 0.6151, 0.3377, 3.315, 3.9819, 1.3572, 3.3259,
+             0.3872, 4.1175, 2.6795, 5.3394, 0.0338];
+  
+  return (d[0] - d[1] / Math.sqrt(1 + Math.pow(d[2] * y, -d[3] * C)) *
+         (y - d[4] * (y - d[5] * ns) / Math.sqrt(Math.pow(y - d[6] * Math.log(d[7] * C), 2) + d[8]) +
+          d[9] * neff / Math.sqrt(d[10] + sigma8**2) / Math.sqrt(Math.pow(d[11] * y - Math.cos(d[12] * neff), 2) + 1) +
+          (d[13] + d[14] * neff - d[15] * C - d[16] * y) * (d[17] * neff + d[18] * y + Math.cos(d[19] * neff)) /
+          Math.sqrt(y**2 + d[20])));
+}
+
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 export interface PowerSpectrumResult {
@@ -303,10 +426,16 @@ export interface PowerSpectrumResult {
   pknow_fid: number[];
   pk: number[];
   pknow: number[];
+  pk_nl_fid: number[];  // Nonlinear fiducial
+  pk_nl: number[];      // Nonlinear with ShapeFit
   kPk_fid: number[];
   kPk: number[];
+  kPk_nl_fid: number[];
+  kPk_nl: number[];
   kPk3_fid: number[];
   kPk3: number[];
+  kPk3_nl_fid: number[];
+  kPk3_nl: number[];
   f: number;
   sigma8_z: number;
 }
@@ -353,6 +482,12 @@ export function computePowerSpectrum(
   const pk = pk_z0.map(p => p * Dz2);
   const pknow = pknow_z0.map(p => p * Dz2);
   
+  // Compute nonlinear spectra
+  const pk_nl_fid_z0 = computeNonlinearPk(k, cosmo, 0.0);
+  const { pk: pk_nl_z0 } = applyShapeFit(k, pk_nl_fid_z0, pknow_fid_z0_norm, shapefit);
+  const pk_nl_fid = pk_nl_fid_z0.map(p => p * Dz2);
+  const pk_nl = pk_nl_z0.map(p => p * Dz2);
+  
   // Growth rate (modified by ShapeFit df and dA)
   const f0 = growthRateF(z, cosmo.omega_m);
   const f = f0 * shapefit.df / Math.sqrt(shapefit.dA);
@@ -366,10 +501,16 @@ export function computePowerSpectrum(
     pknow_fid,
     pk,
     pknow,
+    pk_nl_fid,
+    pk_nl,
     kPk_fid: k.map((ki, i) => ki * pk_fid[i]),
     kPk: k.map((ki, i) => ki * pk[i]),
+    kPk_nl_fid: k.map((ki, i) => ki * pk_nl_fid[i]),
+    kPk_nl: k.map((ki, i) => ki * pk_nl[i]),
     kPk3_fid: k.map((ki, i) => ki * ki * ki * pk_fid[i] / (2 * Math.PI * Math.PI)),
     kPk3: k.map((ki, i) => ki * ki * ki * pk[i] / (2 * Math.PI * Math.PI)),
+    kPk3_nl_fid: k.map((ki, i) => ki * ki * ki * pk_nl_fid[i] / (2 * Math.PI * Math.PI)),
+    kPk3_nl: k.map((ki, i) => ki * ki * ki * pk_nl[i] / (2 * Math.PI * Math.PI)),
     f,
     sigma8_z,
   };
