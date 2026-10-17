@@ -1,15 +1,16 @@
 /**
- * Linear Matter Power Spectrum computation using Eisenstein & Hu (1998)
- * transfer function with BAO wiggles, and the ShapeFit template.
+ * Linear Matter Power Spectrum using Eisenstein & Hu (1998) zero-baryon approximation
+ * with Syren (Bartlett et al. 2023) correction for baryon wiggles.
  * 
  * References:
- * - Eisenstein & Hu (1998), ApJ, 496, 605 (transfer function with wiggles)
- * - Eisenstein & Hu (1998), ApJ, 511, 5 (no-wiggle / zero-baryon approximation)
+ * - Eisenstein & Hu (1998), ApJ, 511, 5 (zero-baryon approximation)
+ * - Bartlett et al. (2023), arXiv:2311.15865 (Syren emulator)
  * - Brieden, Gil-Marin & Verde (2021), arXiv:2106.07641 (ShapeFit)
  * - desilike shapefit-prime: https://github.com/dforero0896/desilike/tree/shapefit-prime
  */
 
 const T_CMB = 2.7255; // CMB temperature [K]
+const THETA_27 = T_CMB / 2.7;
 
 export interface CosmoParams {
   omega_m: number;   // Total matter density Ω_m
@@ -55,233 +56,120 @@ export const DEFAULT_SHAPEFIT: ShapeFitParams = {
   a: 0.6,
 };
 
-// ─── Eisenstein & Hu (1998) Transfer Function ────────────────────────────────
+// ─── Eisenstein & Hu (1998) Zero-Baryon Transfer Function ────────────────────
 
 /**
- * Compute the EH98 transfer function T(k) with baryonic wiggles.
- * k is in units of h/Mpc.
+ * Compute the EH98 zero-baryon (no-wiggle) transfer function.
+ * This is the smooth component without BAO wiggles.
+ * 
+ * k is in h/Mpc.
  */
-function transferEH98(k_h: number[], cosmo: CosmoParams): number[] {
+function transferEH98NoWiggle(k: number[], cosmo: CosmoParams): number[] {
   const { omega_m, omega_b, h } = cosmo;
-  const omega_cdm = omega_m - omega_b;
-  const h2 = h * h;
-  const theta = T_CMB / 2.7;
-  const theta2 = theta * theta;
-  const theta4 = theta2 * theta2;
+  const om0h2 = omega_m * h * h;
+  const ombh2 = omega_b * h * h;
+  const ombom0 = omega_b / omega_m;
   
-  // Physical densities
-  const wm = omega_m * h2;  // ω_m = Ω_m h²
-  const wb = omega_b * h2;  // ω_b = Ω_b h²
+  // Sound horizon scale [Mpc]
+  const s = 44.5 * Math.log(9.83 / om0h2) / Math.sqrt(1.0 + 10.0 * Math.pow(ombh2, 0.75));
   
-  // Fractions
-  const fb = omega_b / omega_m;  // baryon fraction
-  const fc = omega_cdm / omega_m; // CDM fraction
+  // Alpha parameter for effective shape
+  const alphaGamma = 1.0 - 0.328 * Math.log(431.0 * om0h2) * ombom0 +
+                     0.38 * Math.log(22.3 * om0h2) * ombom0 * ombom0;
   
-  // Redshift of equality (EH98 eq. 2)
-  const zeq = 2.5e4 * wm / theta4;
-  
-  // Scale of equality (EH98 eq. 3) [Mpc⁻¹]
-  const keq = 7.46e-2 * wm / (theta2 * theta2);
-  
-  // Drag redshift (EH98 eq. 4)
-  const zdb1 = 0.313 * Math.pow(wm, -0.419) * (1 + 0.607 * Math.pow(wm, 0.674));
-  const zdb2 = 0.0129 * Math.pow(wm, 0.251) / (1 + 0.217 * Math.pow(wm, 0.764));
-  const zd = zdb1 * (1 + zdb2 * Math.pow(wb, 0.238));
-  
-  // Sound horizon (EH98 eq. 5) [Mpc]
-  const Rd = 31.5e3 * wb / (theta4 * zd) * 1e-3;  // R at drag
-  const Req = 31.5e3 * wb / (theta4 * zeq) * 1e-3; // R at equality
-  const s = (2 / (3 * keq)) * Math.sqrt(6 / Req) * 
-            Math.log((Math.sqrt(1 + Rd) + Math.sqrt(Rd + Req)) / (1 + Math.sqrt(Req)));
-  
-  // Silk damping scale (EH98 eq. 7) [Mpc⁻¹]
-  const ks = 1.6 * Math.pow(wb, 0.52) * Math.pow(wm, 0.73) * (1 + Math.pow(10.4 * wm, -0.95));
-  
-  // CDM alpha parameters (EH98 eq. 11)
-  const a1 = Math.pow(46.9 * wm, 0.670) * (1 + Math.pow(32.1 * wm, -0.532));
-  const a2 = Math.pow(12.0 * wm, 0.424) * (1 + Math.pow(45.0 * wm, -0.582));
-  const alphac = Math.pow(a1, -fb) * Math.pow(a2, -fb * fb * fb);
-  
-  // Baryon alpha parameter (EH98 eq. 13)
-  const b1 = 0.944 / (1 + Math.pow(458.0 * wm, -0.708));
-  const b2 = Math.pow(0.395 * wm, -0.0207);
-  const alphab = 2.07 * keq * s * Math.pow(1 + Rd, -0.75) * b1 * b2;
-  
-  // Beta parameters (EH98 eq. 14)
-  const betac = 1 / (1 - 0.949 * Math.sqrt(wb / wm) + 0.1 * (wb / wm));
-  // Actually beta_c is for baryon contamination of CDM
-  // beta node (EH98 eq. 23)
-  const bnode = 8.41 * Math.pow(wm, 0.435);
-  
-  // Compute T(k) for each k
-  return k_h.map(k => {
-    // Dimensionless wave number (EH98 eq. 10)
-    const q = k / (13.41 * keq);
+  return k.map(ki => {
+    // Effective shape parameter (dimensionless)
+    const Gamma = omega_m * h * (alphaGamma + (1.0 - alphaGamma) / 
+                    (1.0 + Math.pow(0.43 * ki * h * s, 4)));
     
-    // T~_0 function (EH98 eq. 17)
-    // L_0(q) = ln(e + 1.96 q)  where e = 2.718...
-    // C_0(q) = 14.2 + 731 / (1 + 62.5 q)
-    const T0 = (qq: number) => {
-      const L0 = Math.log(Math.E * qq + 1.96 * qq * qq);
-      const C0 = 14.2 + 731 / (1 + 62.5 * qq);
-      return L0 / (L0 + C0 * qq * qq);
-    };
+    // Dimensionless wavenumber
+    const q = ki * THETA_27 * THETA_27 / Gamma;
     
-    // Damping factor (EH98 eq. 19)
-    const ks_val = k * s;
-    const f = 1 / (1 + Math.pow(ks_val / 5.4, 4));
+    // Transfer function
+    const C0 = 14.2 + 731.0 / (1.0 + 62.5 * q);
+    const L0 = Math.log(2.0 * Math.E + 1.8 * q);
+    const tk = L0 / (L0 + C0 * q * q);
     
-    // CDM transfer function (EH98 eq. 17-20)
-    const Tc = f * T0(q / alphac) + (1 - f) * T0(q);
-    // Note: the paper says T~_c = f * T~_0(q/α_c) + (1-f) * T~_0(q)
-    // But actually looking more carefully, the first term should use T0 evaluated at q/alpha_c
-    // and the second at q. Let me re-read...
-    // Actually EH98 eq 17: T_c = f * T_tilde_0(q) + (1-f) * T_tilde_0(q/alpha_c)
-    // where f is the damping factor. Let me fix this:
-    const Tc_correct = f * T0(q) + (1 - f) * T0(q / alphac);
-    
-    // Baryon transfer function (EH98 eq. 21-24)
-    const stilde = s / Math.pow(1 + Math.pow(bnode / (k * s), 3), 1/3);
-    const sinTerm = Math.sin(k * stilde) / (k * stilde);
-    const Tb = (T0(q) / (1 + Math.pow(ks_val / 5.2, 2)) + 
-                alphab / (1 + Math.pow(bnode / (k * s), 3))) * sinTerm;
-    
-    // Total transfer function (EH98 eq. 16)
-    return fc * Tc_correct + fb * Tb;
+    return tk;
   });
 }
 
+// ─── Syren Correction for Baryon Wiggles ─────────────────────────────────────
+
 /**
- * Compute the no-wiggle transfer function using EH98 zero-baryon approximation.
- * (Eisenstein & Hu 1998, ApJ 511, 5, eq. 29-31)
+ * Compute the Syren (Bartlett et al. 2023) correction factor logF.
+ * This adds the BAO wiggles and other baryonic effects to the no-wiggle spectrum.
+ * 
+ * P_lin(k) = P_EH_noWiggle(k) * exp(logF(k))
  */
-function transferNoWiggle(k_h: number[], cosmo: CosmoParams): number[] {
+function syrenLogF(k: number[], cosmo: CosmoParams): number[] {
   const { omega_m, omega_b, h } = cosmo;
-  const h2 = h * h;
-  const wm = omega_m * h2;
-  const wb = omega_b * h2;
-  const fb = omega_b / omega_m;
+  const Om = omega_m;
+  const Ob = omega_b;
   
-  // Effective shape parameter (EH98 eq. 29)
-  const alpha = 1 - 0.328 * Math.log(431 * wm) * fb + 
-                0.38 * Math.log(22.3 * wm) * fb * fb;
+  // Syren fiducial coefficients (from Bartlett et al. 2023)
+  const b = [0.05448654, 0.00379, 0.0396711937097927, 0.127733431568858, 1.35,
+             4.053543862744234, 0.0008084539054750851, 1.8852431049189666,
+             0.11418372931475675, 3.798, 14.909, 5.56, 15.8274343004709, 0.0230755621512691,
+             0.86531976, 0.8425442636372944, 4.553956000000005, 5.116999999999995,
+             70.0234239999998, 0.01107, 5.35, 6.421, 134.309, 5.324, 21.532,
+             4.741999999999985, 16.68722499999999, 3.078, 16.987, 0.05881491,
+             0.0006864690561825617, 195.498, 0.0038454457516892, 0.276696018851544,
+             7.385, 12.3960625361899, 0.0134114370723638];
   
-  // Gamma_eff (EH98 eq. 31)
-  const gamma = omega_m * h * alpha;
-  
-  return k_h.map(k => {
-    // q in units of Mpc⁻¹: q = k / gamma where gamma is in h/Mpc
-    // Actually, in EH98 the shape parameter Gamma = Omega_m * h, and q = k/Gamma
-    // with k in Mpc⁻¹. Since our k is in h/Mpc, we have q = k * h / Gamma = k / Omega_m
-    // Wait no. Let me be more careful.
-    // In EH98 no-wiggle: Gamma_eff = Omega_m * h * alpha
-    // q = k / (Gamma_eff * Mpc⁻¹) where k is in Mpc⁻¹
-    // Our k is in h/Mpc, so k_phys = k * h [Mpc⁻¹]
-    // q = k * h / (Omega_m * h * alpha) = k / (Omega_m * alpha)
-    // Hmm, but that doesn't seem right either. Let me think again.
-    // 
-    // Actually the standard form is: q = k * theta^2 / (Omega_m * h^2 * Mpc^-1)
-    // for the full EH98, but for the no-wiggle approximation:
-    // The transfer function is T(k) = L_0 / (L_0 + C_0 * q^2)
-    // where q = k / (Omega_m * h * alpha * Mpc^-1) and k is in Mpc^-1
-    //
-    // Since our k is in h/Mpc: k_physical = k * h [Mpc^-1]
-    // q = k * h / (Omega_m * h * alpha) = k / (Omega_m * alpha)
-    // 
-    // Actually wait. Let me look at this differently.
-    // The standard convention: Gamma_eff has units of h/Mpc (it's Omega_m * h * alpha)
-    // q = k / Gamma_eff where k is in h/Mpc and Gamma_eff is in h/Mpc
-    // So q = k / (Omega_m * h * alpha)
-    // But that gives q dimensionless only if k is in h/Mpc and Gamma_eff is in h/Mpc.
-    // Omega_m * h has units of h/Mpc? No, Omega_m is dimensionless and h is dimensionless.
-    // 
-    // The issue is that in EH98, k is in Mpc^-1 and Gamma is in Mpc^-1.
-    // Gamma = Omega_m * h [Mpc^-1]
-    // Our k is in h/Mpc, so k [Mpc^-1] = k_h * h
-    // q = k_h * h / (Omega_m * h * alpha) = k_h / (Omega_m * alpha)
-    //
-    // Hmm, but actually I think the standard way is:
-    // In the no-wiggle approximation, the shape parameter is
-    // Gamma_eff = Omega_m * h (in units of Mpc^-1 when multiplied by appropriate factors)
-    // and q = k / Gamma_eff
-    //
-    // Let me just use: q = k / (gamma) where gamma = Omega_m * h * alpha
-    // and k is in h/Mpc. This gives q dimensionless.
-    // Actually no, the units don't work out. Let me just use the formula directly.
+  return k.map(ki => {
+    const line1 = b[0] * h - b[1];
     
-    // The standard form from EH98 eq 30:
-    // T_0(k) = ln(1 + 2.718*beta*q) / (ln(1 + 2.718*beta*q) + C*q^2)
-    // where q = k/(Omega_m*h^2*Mpc^-1) * theta^(-2) ... no this is getting confused.
-    //
-    // Let me use a cleaner formulation. In the Eisenstein & Hu no-wiggle approximation:
-    // The transfer function depends on k/Gamma where Gamma = Omega_m * h [Mpc^-1]
-    // For k in h/Mpc: k/Gamma = k/(Omega_m * h) * h = k/Omega_m
-    // But we also have the alpha correction.
-    // 
-    // I'll use the standard form where q = k * theta^2 / (Omega_m * h^2)
-    // modified by alpha for the no-wiggle case.
-    // Actually, let me just use the simplest correct form:
+    const line2 = (
+      Math.pow((Ob * b[2]) / Math.sqrt(h * h + b[3]), b[4] * Om) *
+      (
+        (b[5] * ki - Ob) / Math.sqrt(b[6] + Math.pow(Ob - b[7] * ki, 2)) *
+        b[8] * Math.pow(b[9] * ki, -b[10] * ki) * Math.cos(Om * b[11] - (b[12] * ki) / Math.sqrt(b[13] + Ob * Ob))
+        - b[14] * ((b[15] * ki) / Math.sqrt(1 + b[16] * ki * ki) - Om) *
+        Math.cos(b[17] * h / Math.sqrt(1 + b[18] * ki * ki))
+      )
+    );
     
-    const theta = T_CMB / 2.7;
-    const theta2 = theta * theta;
+    const line3 = (
+      b[19] * (b[20] * Om + b[21] * h - Math.log(b[22] * ki) +
+      Math.pow(b[23] * ki, -b[24] * ki)) * Math.cos(b[25] / Math.sqrt(1 + b[26] * ki * ki))
+    );
     
-    // Standard q parameter: q = k / (Omega_m * h^2 / theta^2) [with k in Mpc^-1]
-    // For k in h/Mpc: k_Mpc = k * h, so q = k * h * theta^2 / (Omega_m * h^2) = k * theta^2 / (Omega_m * h)
-    // With the alpha correction: q_eff = k * theta^2 / (gamma) where gamma = Omega_m * h * alpha
-    // q_eff = k / (Omega_m * alpha) * theta^2 / h... this is getting circular.
+    const line4 = (
+      Math.pow(b[27] * ki, -b[28] * ki) * (b[29] * ki - (b[30] * Math.log(b[31] * ki)) /
+      Math.sqrt(b[32] + Math.pow(Om - b[33] * h, 2))) *
+      Math.cos(Om * b[34] - (b[35] * ki) / Math.sqrt(Ob * Ob + b[36]))
+    );
     
-    // Let me just use the standard result directly:
-    // For the zero-baryon transfer function, the shape parameter is
-    // Gamma = Omega_m * h * alpha [in Mpc^-1]
-    // The dimensionless variable is q = k [Mpc^-1] / Gamma
-    // Since k is in h/Mpc: k [Mpc^-1] = k_h * h
-    // q = k_h * h / (Omega_m * h * alpha) = k_h / (Omega_m * alpha)
-    
-    // But wait, this doesn't have theta dependence... Let me look at this more carefully.
-    // Actually in the standard EH98 formulation, for the CDM case:
-    // q = k / (Omega_m * h^2 * Mpc^-1) * theta_CMB^{-2}
-    // For the no-wiggle approximation, this becomes:
-    // q = k * theta^2 / (Gamma_eff) where Gamma_eff = Omega_m * h * alpha
-    // and k is in Mpc^-1.
-    // So q = k_h * h * theta^2 / (Omega_m * h * alpha) = k_h * theta^2 / (Omega_m * alpha)
-    
-    const q = k * theta2 / (omega_m * alpha);
-    
-    // Transfer function (EH98 eq. 30)
-    const L0 = Math.log(2 * Math.E * q + 1.8 * q * q);  // Actually: ln(e + 1.96q) for C0 form
-    // Let me use the exact form from EH98 eq 30:
-    // T_0 = L_0 / (L_0 + C_0 * q^2)
-    // L_0(q) = ln(1 + 2.718*q)  (approximately)
-    // C_0(q) = 14.2 + 386/(1 + 69.9*q)  (from eq 31, for zero baryon)
-    // Actually, looking at the paper more carefully:
-    // For the no-wiggle (zero-baryon) approximation:
-    // T_0(k) = L_0 / (L_0 + C_0 * q^2)
-    // L_0 = ln(e + 1.96*q)  where e = 2.71828...
-    // C_0 = 14.2 + 731/(1 + 62.5*q)
-    // These are the same as the full EH98, just with q redefined via Gamma_eff
-    
-    const L0_val = Math.log(Math.E + 1.96 * q);
-    const C0_val = 14.2 + 731 / (1 + 62.5 * q);
-    
-    return L0_val / (L0_val + C0_val * q * q);
+    return line1 + line2 + line3 + line4;
   });
 }
 
 // ─── Power Spectrum Computation ──────────────────────────────────────────────
 
 /**
- * Compute the linear matter power spectrum P(k) = A * k^n_s * T(k)^2
- * normalized to match sigma8.
+ * Compute the linear matter power spectrum using EH98 + Syren.
+ * P(k) = A * k^n_s * T(k)^2 * exp(logF(k))
+ * 
+ * Normalized to match sigma8.
  */
-function computePk(k: number[], T: number[], n_s: number, sigma8: number): number[] {
-  // Unnormalized P(k)
-  const pk_unnorm = k.map((ki, i) => Math.pow(ki, n_s) * T[i] * T[i]);
+function computeLinearPk(k: number[], cosmo: CosmoParams): number[] {
+  const { n_s, sigma8 } = cosmo;
+  
+  // Get transfer function and Syren correction
+  const T_nw = transferEH98NoWiggle(k, cosmo);
+  const logF = syrenLogF(k, cosmo);
+  
+  // Unnormalized P(k) = k^n_s * T^2 * exp(logF)
+  const pk_unnorm = k.map((ki, i) => 
+    Math.pow(ki, n_s) * T_nw[i] * T_nw[i] * Math.exp(logF[i])
+  );
   
   // Compute sigma8 from unnormalized P(k)
   const R = 8.0; // Mpc/h
   const s8sq = sigma8Squared(k, pk_unnorm, R);
   
-  // Normalize
+  // Normalize to match sigma8
   const norm = (sigma8 * sigma8) / s8sq;
   return pk_unnorm.map(p => p * norm);
 }
@@ -423,7 +311,7 @@ export interface PowerSpectrumResult {
   sigma8_z: number;
 }
 
-export function generateKGrid(kmin = 1e-4, kmax = 0.5, n = 400): number[] {
+export function generateKGrid(kmin = 0.005, kmax = 0.5, n = 400): number[] {
   const k: number[] = [];
   const lmin = Math.log10(kmin);
   const lmax = Math.log10(kmax);
@@ -438,25 +326,30 @@ export function computePowerSpectrum(
   shapefit: ShapeFitParams,
   z: number = 0.0
 ): PowerSpectrumResult {
-  const k = generateKGrid(1e-4, 0.5, 400);
+  // Focus on k = 0.02 to 0.5 as requested, with some padding
+  const k = generateKGrid(0.005, 0.5, 500);
   
-  // Compute fiducial transfer functions
-  const T_fid = transferEH98(k, cosmo);
-  const T_nw_fid = transferNoWiggle(k, cosmo);
+  // Compute fiducial no-wiggle spectrum (EH98 zero-baryon)
+  const T_nw_fid = transferEH98NoWiggle(k, cosmo);
+  const pknow_fid_z0 = k.map((ki, i) => Math.pow(ki, cosmo.n_s) * T_nw_fid[i] * T_nw_fid[i]);
   
-  // Compute fiducial power spectra (normalized to sigma8 at z=0)
-  const pk_fid_z0 = computePk(k, T_fid, cosmo.n_s, cosmo.sigma8);
-  const pknow_fid_z0 = computePk(k, T_nw_fid, cosmo.n_s, cosmo.sigma8);
+  // Normalize no-wiggle to sigma8
+  const s8sq_nw = sigma8Squared(k, pknow_fid_z0, 8.0);
+  const norm_nw = (cosmo.sigma8 * cosmo.sigma8) / s8sq_nw;
+  const pknow_fid_z0_norm = pknow_fid_z0.map(p => p * norm_nw);
+  
+  // Compute full fiducial spectrum with Syren correction
+  const pk_fid_z0 = computeLinearPk(k, cosmo);
   
   // Apply ShapeFit template at z=0
-  const { pk: pk_z0, pknow: pknow_z0 } = applyShapeFit(k, pk_fid_z0, pknow_fid_z0, shapefit);
+  const { pk: pk_z0, pknow: pknow_z0 } = applyShapeFit(k, pk_fid_z0, pknow_fid_z0_norm, shapefit);
   
   // Scale to redshift z
   const Dz = growthD(z, cosmo.omega_m);
   const Dz2 = Dz * Dz;
   
   const pk_fid = pk_fid_z0.map(p => p * Dz2);
-  const pknow_fid = pknow_fid_z0.map(p => p * Dz2);
+  const pknow_fid = pknow_fid_z0_norm.map(p => p * Dz2);
   const pk = pk_z0.map(p => p * Dz2);
   const pknow = pknow_z0.map(p => p * Dz2);
   
