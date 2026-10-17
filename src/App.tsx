@@ -183,6 +183,17 @@ export default function App() {
     }));
   }, [result]);
 
+  // Prepare bispectrum data
+  const bispectrumData = useMemo(() => {
+    const { k_bispectrum, bispectrum_fid, bispectrum } = result;
+    
+    return k_bispectrum.map((ki, i) => ({
+      k: ki,
+      bispectrum_fid: bispectrum_fid[i],
+      bispectrum: bispectrum[i],
+    }));
+  }, [result]);
+
   const plotLabel = (useNonlinear ? 'Nonlinear ' : 'Linear ') + 
                     (plotMode === 'pk' ? 'P(k) [(Mpc/h)³]' :
                      plotMode === 'kpk' ? 'k·P(k) [(Mpc/h)²]' :
@@ -457,16 +468,16 @@ export default function App() {
             <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-purple-500"></span>
               Two-Point Correlation Function s²ξ(s)
-              <span className="text-xs text-gray-500">(Hankel transform of P(k), regularized)</span>
+              <span className="text-xs text-gray-500">(Hankel transform of P(k))</span>
             </h3>
             <ResponsiveContainer width="100%" height={350}>
               <LineChart data={correlationData} margin={{ top: 10, right: 30, left: 20, bottom: 20 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
                 <XAxis
                   dataKey="r"
-                  scale="log"
-                  domain={[1, 200]}
-                  ticks={[1, 2, 5, 10, 20, 50, 100, 200]}
+                  scale="linear"
+                  domain={[0, 200]}
+                  ticks={[0, 20, 40, 60, 80, 100, 120, 140, 160, 180, 200]}
                   tickFormatter={(v) => v.toString()}
                   stroke="#6B7280"
                   label={{ value: 's [Mpc/h]', position: 'bottom', offset: 0, style: { fill: '#9CA3AF', fontSize: 12 } }}
@@ -491,7 +502,7 @@ export default function App() {
               </LineChart>
             </ResponsiveContainer>
             <p className="text-xs text-gray-500 mt-2">
-              The scaled correlation function s²ξ(s) highlights the BAO peak at s ≈ 100 Mpc/h. Regularized with Gaussian window to improve convergence.
+              The scaled correlation function s²ξ(s) with linear axes. The BAO peak appears at s ≈ 100 Mpc/h.
             </p>
           </div>
 
@@ -506,9 +517,9 @@ export default function App() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
                 <XAxis
                   dataKey="r"
-                  scale="log"
-                  domain={[1, 200]}
-                  ticks={[1, 2, 5, 10, 20, 50, 100, 200]}
+                  scale="linear"
+                  domain={[0, 200]}
+                  ticks={[0, 20, 40, 60, 80, 100, 120, 140, 160, 180, 200]}
                   tickFormatter={(v) => v.toString()}
                   stroke="#6B7280"
                   label={{ value: 's [Mpc/h]', position: 'bottom', offset: 0, style: { fill: '#9CA3AF', fontSize: 12 } }}
@@ -529,6 +540,47 @@ export default function App() {
                 <Line type="monotone" dataKey="ratio_nl" name="s²ξ_nl(s)/s²ξ_nl,fid(s)" stroke="#F97316" strokeWidth={2} dot={false} />
               </LineChart>
             </ResponsiveContainer>
+          </div>
+
+          {/* Tree-Level Bispectrum Plot */}
+          <div className="bg-gray-800 rounded-xl border border-gray-700 p-4 mb-4 shadow-xl">
+            <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-green-500"></span>
+              Tree-Level Bispectrum B(k₁, k₂, k₃)
+              <span className="text-xs text-gray-500">(Isosceles right triangle: k₁=k₂, k₃=k₁√2)</span>
+            </h3>
+            <ResponsiveContainer width="100%" height={350}>
+              <LineChart data={bispectrumData} margin={{ top: 10, right: 30, left: 20, bottom: 20 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+                <XAxis
+                  dataKey="k"
+                  scale="linear"
+                  domain={[0.01, 0.3]}
+                  ticks={[0.05, 0.1, 0.15, 0.2, 0.25, 0.3]}
+                  tickFormatter={(v) => v.toFixed(2)}
+                  stroke="#6B7280"
+                  label={{ value: 'k₁ [h/Mpc]', position: 'bottom', offset: 0, style: { fill: '#9CA3AF', fontSize: 12 } }}
+                />
+                <YAxis
+                  scale="linear"
+                  domain={['auto', 'auto']}
+                  stroke="#6B7280"
+                  tickFormatter={(v) => v.toExponential(1)}
+                  label={{ value: 'B(k₁, k₁, k₁√2) [(Mpc/h)⁶]', angle: -90, position: 'insideLeft', offset: -5, style: { fill: '#9CA3AF', fontSize: 11 } }}
+                />
+                <Tooltip
+                  contentStyle={{ backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '8px', fontSize: 12 }}
+                  labelFormatter={(v) => `k₁ = ${(v as number).toFixed(3)} h/Mpc`}
+                  formatter={(value: number, name: string) => [value.toExponential(3), name]}
+                />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Line type="monotone" dataKey="bispectrum_fid" name="B_fid(k₁)" stroke="#60A5FA" strokeWidth={2.5} dot={false} />
+                <Line type="monotone" dataKey="bispectrum" name="B(k₁) [modified]" stroke="#F87171" strokeWidth={2.5} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+            <p className="text-xs text-gray-500 mt-2">
+              Tree-level bispectrum from second-order perturbation theory. Shows the leading-order three-point correlation in Fourier space.
+            </p>
           </div>
 
           {/* Ratio Plot */}

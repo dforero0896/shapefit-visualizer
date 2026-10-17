@@ -441,6 +441,9 @@ export interface PowerSpectrumResult {
   xi: number[];
   xi_nl_fid: number[];
   xi_nl: number[];
+  k_bispectrum: number[];
+  bispectrum_fid: number[];
+  bispectrum: number[];
   f: number;
   sigma8_z: number;
 }
@@ -516,6 +519,11 @@ export function computePowerSpectrum(
   const xi_nl_fid = computeCorrelationFunction(k_xi, pk_nl_fid_xi, r);
   const xi_nl = computeCorrelationFunction(k_xi, pk_nl_xi, r);
   
+  // Compute tree-level bispectrum for isosceles right triangle (k1, k1, k1*√2)
+  const k_bispectrum = generateKGrid(0.01, 0.3, 100);
+  const bispectrum_fid = computeTreeLevelBispectrum(k_bispectrum, pk_fid, 1.0, Math.sqrt(2));
+  const bispectrum = computeTreeLevelBispectrum(k_bispectrum, pk, 1.0, Math.sqrt(2));
+  
   return {
     k,
     pk_fid,
@@ -537,6 +545,9 @@ export function computePowerSpectrum(
     xi,
     xi_nl_fid,
     xi_nl,
+    k_bispectrum,
+    bispectrum_fid,
+    bispectrum,
     f,
     sigma8_z,
   };
@@ -645,4 +656,64 @@ export function generateRGrid(rmin: number = 1, rmax: number = 200, n: number = 
   }
   
   return r;
+}
+
+/**
+ * Compute second-order perturbation theory kernel F2(k1, k2)
+ * F2(k1, k2) = 5/7 + (1/2)(k1·k2)(1/k1² + 1/k2²) + (2/7)(k1·k2)²/(k1²k2²)
+ */
+function F2kernel(k1: number, k2: number, cosAngle: number): number {
+  const k1k2 = k1 * k2 * cosAngle;
+  const k1sq = k1 * k1;
+  const k2sq = k2 * k2;
+  
+  return 5/7 + 0.5 * k1k2 * (1/k1sq + 1/k2sq) + (2/7) * k1k2 * k1k2 / (k1sq * k2sq);
+}
+
+/**
+ * Compute tree-level bispectrum B(k1, k2, k3)
+ * B(k1, k2, k3) = 2[F2(k1,k2)P(k1)P(k2) + F2(k2,k3)P(k2)P(k3) + F2(k1,k3)P(k1)P(k3)]
+ * 
+ * For a triangle configuration with k1 + k2 + k3 = 0:
+ * cos(k1,k2) = (k3² - k1² - k2²) / (2*k1*k2)
+ */
+export function computeTreeLevelBispectrum(
+  k: number[],
+  pk: number[],
+  k2_ratio: number = 1.0,  // k2/k1 ratio
+  k3_ratio: number = 1.414 // k3/k1 ratio (√2 for isosceles right triangle)
+): number[] {
+  const bispectrum = new Array(k.length).fill(0);
+  
+  for (let i = 0; i < k.length; i++) {
+    const k1 = k[i];
+    const k2 = k1 * k2_ratio;
+    const k3 = k1 * k3_ratio;
+    
+    // Interpolate P(k) at k2 and k3
+    const pk1 = pk[i];
+    const pk2 = interpolatePowerSpectrum(k, pk, [k2])[0];
+    const pk3 = interpolatePowerSpectrum(k, pk, [k3])[0];
+    
+    // Compute angles from triangle condition: k1 + k2 + k3 = 0
+    // cos(k1,k2) = (k3² - k1² - k2²) / (2*k1*k2)
+    const cos12 = (k3*k3 - k1*k1 - k2*k2) / (2 * k1 * k2);
+    const cos23 = (k1*k1 - k2*k2 - k3*k3) / (2 * k2 * k3);
+    const cos13 = (k2*k2 - k1*k1 - k3*k3) / (2 * k1 * k3);
+    
+    // Clamp cosines to [-1, 1] to avoid numerical issues
+    const cos12_clamped = Math.max(-1, Math.min(1, cos12));
+    const cos23_clamped = Math.max(-1, Math.min(1, cos23));
+    const cos13_clamped = Math.max(-1, Math.min(1, cos13));
+    
+    // Compute F2 kernels
+    const F2_12 = F2kernel(k1, k2, cos12_clamped);
+    const F2_23 = F2kernel(k2, k3, cos23_clamped);
+    const F2_13 = F2kernel(k1, k3, cos13_clamped);
+    
+    // Tree-level bispectrum
+    bispectrum[i] = 2 * (F2_12 * pk1 * pk2 + F2_23 * pk2 * pk3 + F2_13 * pk1 * pk3);
+  }
+  
+  return bispectrum;
 }
