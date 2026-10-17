@@ -1,8 +1,9 @@
 import { useState, useMemo, useCallback } from 'react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
-  ResponsiveContainer, ReferenceLine
+  ResponsiveContainer, ReferenceLine, ScatterChart, Scatter
 } from 'recharts';
+import { desiDR1Data } from './desiData';
 import {
   computePowerSpectrum,
   DEFAULT_COSMO,
@@ -87,6 +88,7 @@ export default function App() {
   const [redshift, setRedshift] = useState(0.5);
   const [activeTab, setActiveTab] = useState('cosmo');
   const [plotMode, setPlotMode] = useState<'pk' | 'kpk' | 'dkpk'>('dkpk');
+  const [showDESI, setShowDESI] = useState(true);
 
   const result = useMemo(() => {
     return computePowerSpectrum(cosmo, shapefit, redshift);
@@ -328,33 +330,45 @@ export default function App() {
 
           {/* Main Power Spectrum Plot */}
           <div className="bg-gray-800 rounded-xl border border-gray-700 p-4 mb-4 shadow-xl">
-            <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-              Linear Matter Power Spectrum — {plotLabel}
-            </h3>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-gray-300 flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                Linear Matter Power Spectrum — {plotLabel}
+                {plotMode === 'kpk' && <span className="text-xs text-gray-500">(linear scales)</span>}
+              </h3>
+              <label className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={showDESI}
+                  onChange={(e) => setShowDESI(e.target.checked)}
+                  className="rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-blue-500"
+                />
+                <span>Show DESI DR1 data (Cereskaite et al. 2025)</span>
+              </label>
+            </div>
             <ResponsiveContainer width="100%" height={400}>
               <LineChart data={chartData} margin={{ top: 10, right: 30, left: 20, bottom: 20 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
                 <XAxis
                   dataKey="k"
-                  scale="log"
-                  domain={[0.005, 0.5]}
-                  ticks={[0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5]}
+                  scale={plotMode === 'kpk' ? 'linear' : 'log'}
+                  domain={plotMode === 'kpk' ? [0.02, 0.3] : [0.005, 0.5]}
+                  ticks={plotMode === 'kpk' ? [0.02, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3] : [0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5]}
                   tickFormatter={(v) => v.toString()}
                   stroke="#6B7280"
                   label={{ value: 'k [h/Mpc]', position: 'bottom', offset: 0, style: { fill: '#9CA3AF', fontSize: 12 } }}
                 />
                 <YAxis
-                  scale="log"
-                  domain={['auto', 'auto']}
+                  scale={plotMode === 'kpk' ? 'linear' : 'log'}
+                  domain={plotMode === 'kpk' ? ['auto', 'auto'] : ['auto', 'auto']}
                   stroke="#6B7280"
-                  tickFormatter={(v) => v.toExponential(1)}
+                  tickFormatter={plotMode === 'kpk' ? (v) => v.toFixed(1) : (v) => v.toExponential(1)}
                   label={{ value: plotLabel, angle: -90, position: 'insideLeft', offset: -5, style: { fill: '#9CA3AF', fontSize: 11 } }}
                 />
                 <Tooltip
                   contentStyle={{ backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '8px', fontSize: 12 }}
                   labelFormatter={(v) => `k = ${(v as number).toFixed(4)} h/Mpc`}
-                  formatter={(value: number, name: string) => [value.toExponential(3), name]}
+                  formatter={(value: number, name: string) => [plotMode === 'kpk' ? value.toFixed(2) : value.toExponential(3), name]}
                 />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
                 <ReferenceLine x={shapefit.kp} stroke="#fbbf24" strokeDasharray="5 5" strokeWidth={1.5}
@@ -365,6 +379,11 @@ export default function App() {
                 <Line type="monotone" dataKey="noWiggleMod" name="P_now(k) [modified]" stroke="#F87171" strokeWidth={1.5} strokeDasharray="6 3" dot={false} />
               </LineChart>
             </ResponsiveContainer>
+            
+            {/* DESI Data Points Overlay */}
+            {showDESI && (
+              <DESIDataPanel plotMode={plotMode} plotLabel={plotLabel} />
+            )}
           </div>
 
           {/* Ratio Plot */}
@@ -378,9 +397,9 @@ export default function App() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
                 <XAxis
                   dataKey="k"
-                  scale="log"
-                  domain={[0.005, 0.5]}
-                  ticks={[0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5]}
+                  scale={plotMode === 'kpk' ? 'linear' : 'log'}
+                  domain={plotMode === 'kpk' ? [0.02, 0.3] : [0.005, 0.5]}
+                  ticks={plotMode === 'kpk' ? [0.02, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3] : [0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5]}
                   tickFormatter={(v) => v.toString()}
                   stroke="#6B7280"
                   label={{ value: 'k [h/Mpc]', position: 'bottom', offset: 0, style: { fill: '#9CA3AF', fontSize: 12 } }}
@@ -412,8 +431,8 @@ export default function App() {
               Shows how the current parameter choices modify Δ²(k) relative to the Planck 2018 fiducial cosmology.
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <CosmoEffectPlot cosmo={cosmo} />
-              <ShapeFitEffectPlot cosmo={cosmo} shapefit={shapefit} />
+              <CosmoEffectPlot cosmo={cosmo} plotMode={plotMode} />
+              <ShapeFitEffectPlot cosmo={cosmo} shapefit={shapefit} plotMode={plotMode} />
             </div>
           </div>
 
@@ -448,7 +467,7 @@ export default function App() {
 
 // ─── Cosmological Effect Plot ───────────────────────────────────────────────
 
-function CosmoEffectPlot({ cosmo }: { cosmo: CosmoParams }) {
+function CosmoEffectPlot({ cosmo, plotMode }: { cosmo: CosmoParams; plotMode: string }) {
   const data = useMemo(() => {
     const defaultResult = computePowerSpectrum(DEFAULT_COSMO, DEFAULT_SHAPEFIT, 0.5);
     const currentResult = computePowerSpectrum(cosmo, DEFAULT_SHAPEFIT, 0.5);
@@ -456,7 +475,7 @@ function CosmoEffectPlot({ cosmo }: { cosmo: CosmoParams }) {
     const points: { k: number; ratio: number }[] = [];
     for (let i = 0; i < defaultResult.k.length; i++) {
       const ki = defaultResult.k[i];
-      if (ki < 0.01 || ki > 0.5) continue;
+      if (ki < 0.02 || ki > 0.5) continue;
       points.push({
         k: ki,
         ratio: currentResult.kPk3[i] / defaultResult.kPk3[i],
@@ -471,8 +490,8 @@ function CosmoEffectPlot({ cosmo }: { cosmo: CosmoParams }) {
       <ResponsiveContainer width="100%" height={200}>
         <LineChart data={data} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
-          <XAxis dataKey="k" scale="log" domain={[0.01, 0.5]} 
-            ticks={[0.01, 0.02, 0.05, 0.1, 0.2, 0.5]}
+          <XAxis dataKey="k" scale={plotMode === 'kpk' ? 'linear' : 'log'} domain={[0.02, 0.5]} 
+            ticks={plotMode === 'kpk' ? [0.05, 0.1, 0.2, 0.3, 0.4, 0.5] : [0.02, 0.05, 0.1, 0.2, 0.5]}
             tickFormatter={(v) => v.toString()} stroke="#6B7280" fontSize={10} />
           <YAxis domain={['auto', 'auto']} tickFormatter={(v) => v.toFixed(2)} stroke="#6B7280" fontSize={10} />
           <Tooltip
@@ -489,9 +508,83 @@ function CosmoEffectPlot({ cosmo }: { cosmo: CosmoParams }) {
   );
 }
 
+// ─── DESI Data Panel ────────────────────────────────────────────────────────
+
+function DESIDataPanel({ plotMode, plotLabel }: { plotMode: string; plotLabel: string }) {
+  // Transform DESI data to match the current plot mode
+  const transformedData = desiDR1Data.map(d => {
+    let y: number, yErr: number;
+    if (plotMode === 'pk') {
+      y = d.pk;
+      yErr = d.err;
+    } else if (plotMode === 'kpk') {
+      y = d.k * d.pk;
+      yErr = d.k * d.err;
+    } else {
+      // dkpk = k^3 * P(k) / (2π²)
+      const factor = d.k * d.k * d.k / (2 * Math.PI * Math.PI);
+      y = factor * d.pk;
+      yErr = factor * d.err;
+    }
+    return { ...d, y, yErr };
+  });
+
+  const cmbData = transformedData.filter(d => d.source === 'CMB');
+  const desiData = transformedData.filter(d => d.source === 'DESI');
+
+  return (
+    <div className="mt-3 border-t border-gray-700 pt-3">
+      <h4 className="text-xs font-semibold text-gray-400 mb-2">
+        DESI DR1 + Planck CMB data (Cereskaite et al. 2025, arXiv:2507.16590) — z=0 reconstruction
+      </h4>
+      <ResponsiveContainer width="100%" height={220}>
+        <ScatterChart margin={{ top: 10, right: 30, left: 20, bottom: 20 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+          <XAxis
+            dataKey="k"
+            type="number"
+            scale={plotMode === 'kpk' ? 'linear' : 'log'}
+            domain={plotMode === 'kpk' ? [0.01, 0.2] : [0.0002, 0.2]}
+            tickFormatter={(v: number) => v.toExponential(1)}
+            stroke="#6B7280"
+            label={{ value: 'k [h/Mpc]', position: 'bottom', offset: 0, style: { fill: '#9CA3AF', fontSize: 12 } }}
+          />
+          <YAxis
+            dataKey="y"
+            type="number"
+            scale={plotMode === 'kpk' ? 'linear' : 'log'}
+            domain={['auto', 'auto']}
+            tickFormatter={plotMode === 'kpk' ? (v: number) => v.toFixed(0) : (v: number) => v.toExponential(1)}
+            stroke="#6B7280"
+            label={{ value: plotLabel, angle: -90, position: 'insideLeft', offset: -5, style: { fill: '#9CA3AF', fontSize: 11 } }}
+          />
+          <Tooltip
+            contentStyle={{ backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '8px', fontSize: 11 }}
+            formatter={(value: any, _name: any, props: any) => {
+              const point = props.payload;
+              return [
+                `${Number(value).toExponential(3)} ${plotLabel}`,
+                `${point.source} ${point.tracer || ''} (k=${Number(point.k).toExponential(2)} h/Mpc)`
+              ];
+            }}
+          />
+          <Legend wrapperStyle={{ fontSize: 11 }} />
+          <Scatter name="CMB (Planck 2018)" data={cmbData} fill="#8B5CF6" shape="circle" line={{ stroke: '#8B5CF6', strokeWidth: 1 }} />
+          <Scatter name="DESI DR1 GC (all tracers)" data={desiData} fill="#10B981" shape="diamond" line={{ stroke: '#10B981', strokeWidth: 1 }} />
+        </ScatterChart>
+      </ResponsiveContainer>
+      <p className="text-xs text-gray-500 mt-1">
+        Data from <a href="https://arxiv.org/abs/2507.16590" target="_blank" rel="noopener" className="text-blue-400 hover:underline">Cereskaite et al. (2025)</a>. 
+        Full data: <a href="https://zenodo.org/records/19788154" target="_blank" rel="noopener" className="text-blue-400 hover:underline">Zenodo</a>. 
+        Points shown are representative; error bars indicate 1σ uncertainties.
+      </p>
+    </div>
+  );
+}
+
 // ─── ShapeFit Effect Plot ───────────────────────────────────────────────────
 
-function ShapeFitEffectPlot({ cosmo, shapefit }: { cosmo: CosmoParams; shapefit: ShapeFitParams }) {
+function ShapeFitEffectPlot({ cosmo, shapefit, plotMode }: { cosmo: CosmoParams; shapefit: ShapeFitParams; plotMode: string }) {
   const data = useMemo(() => {
     const defaultResult = computePowerSpectrum(cosmo, DEFAULT_SHAPEFIT, 0.5);
     const currentResult = computePowerSpectrum(cosmo, shapefit, 0.5);
@@ -499,7 +592,7 @@ function ShapeFitEffectPlot({ cosmo, shapefit }: { cosmo: CosmoParams; shapefit:
     const points: { k: number; ratio: number }[] = [];
     for (let i = 0; i < defaultResult.k.length; i++) {
       const ki = defaultResult.k[i];
-      if (ki < 0.01 || ki > 0.5) continue;
+      if (ki < 0.02 || ki > 0.5) continue;
       points.push({
         k: ki,
         ratio: currentResult.kPk3[i] / defaultResult.kPk3[i],
@@ -514,8 +607,8 @@ function ShapeFitEffectPlot({ cosmo, shapefit }: { cosmo: CosmoParams; shapefit:
       <ResponsiveContainer width="100%" height={200}>
         <LineChart data={data} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
-          <XAxis dataKey="k" scale="log" domain={[0.01, 0.5]}
-            ticks={[0.01, 0.02, 0.05, 0.1, 0.2, 0.5]}
+          <XAxis dataKey="k" scale={plotMode === 'kpk' ? 'linear' : 'log'} domain={[0.02, 0.5]}
+            ticks={plotMode === 'kpk' ? [0.05, 0.1, 0.2, 0.3, 0.4, 0.5] : [0.02, 0.05, 0.1, 0.2, 0.5]}
             tickFormatter={(v) => v.toString()} stroke="#6B7280" fontSize={10} />
           <YAxis domain={['auto', 'auto']} tickFormatter={(v) => v.toFixed(2)} stroke="#6B7280" fontSize={10} />
           <Tooltip
