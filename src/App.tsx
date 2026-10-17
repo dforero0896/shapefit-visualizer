@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
-  ResponsiveContainer, ReferenceLine, ScatterChart, Scatter
+  ResponsiveContainer, ReferenceLine, ScatterChart, Scatter, ComposedChart
 } from 'recharts';
 import { desiDR1Data } from './desiData';
 import {
@@ -632,7 +632,7 @@ function DESIDataPanel({ plotMode, plotLabel, result, useNonlinear }: {
         DESI DR1 + Planck CMB data (Cereskaite et al. 2025, arXiv:2507.16590) — z=0 nonlinear reconstruction
       </h4>
       <ResponsiveContainer width="100%" height={280}>
-        <ScatterChart margin={{ top: 10, right: 30, left: 20, bottom: 20 }}>
+        <ComposedChart margin={{ top: 10, right: 30, left: 20, bottom: 20 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
           <XAxis
             dataKey="k"
@@ -644,7 +644,6 @@ function DESIDataPanel({ plotMode, plotLabel, result, useNonlinear }: {
             label={{ value: 'k [h/Mpc]', position: 'bottom', offset: 0, style: { fill: '#9CA3AF', fontSize: 12 } }}
           />
           <YAxis
-            dataKey="y"
             type="number"
             scale={plotMode === 'kpk' ? 'linear' : 'log'}
             domain={['auto', 'auto']}
@@ -654,26 +653,22 @@ function DESIDataPanel({ plotMode, plotLabel, result, useNonlinear }: {
           />
           <Tooltip
             contentStyle={{ backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '8px', fontSize: 11 }}
-            formatter={(value: any, _name: any, props: any) => {
-              const point = props.payload;
-              return [
-                `${Number(value).toExponential(3)} ${plotLabel}`,
-                `${point.source} ${point.tracer || ''} (k=${Number(point.k).toExponential(2)} h/Mpc)`
-              ];
+            formatter={(value: any, name: any) => {
+              return [`${Number(value).toExponential(3)}`, name];
             }}
           />
           <Legend wrapperStyle={{ fontSize: 11 }} />
           
-          {/* Theory curves */}
+          {/* Theory lines */}
           <Line type="monotone" dataKey="linear_fid" data={theoryData} stroke="#60A5FA" strokeWidth={1.5} strokeDasharray="5 5" dot={false} name="Linear (fiducial)" />
           <Line type="monotone" dataKey="linear_mod" data={theoryData} stroke="#60A5FA" strokeWidth={2} dot={false} name="Linear (modified)" />
           <Line type="monotone" dataKey="nonlinear_fid" data={theoryData} stroke="#F97316" strokeWidth={1.5} strokeDasharray="5 5" dot={false} name="Nonlinear (fiducial)" />
           <Line type="monotone" dataKey="nonlinear_mod" data={theoryData} stroke="#F97316" strokeWidth={2} dot={false} name="Nonlinear (modified)" />
           
           {/* Data points */}
-          <Scatter name="CMB (Planck 2018)" data={cmbData} fill="#8B5CF6" shape="circle" />
-          <Scatter name="DESI DR1 GC (all tracers)" data={desiData} fill="#10B981" shape="diamond" />
-        </ScatterChart>
+          <Scatter name="CMB (Planck 2018)" data={cmbData} fill="#8B5CF6" shape="circle" dataKey="y" />
+          <Scatter name="DESI DR1 GC (all tracers)" data={desiData} fill="#10B981" shape="diamond" dataKey="y" />
+        </ComposedChart>
       </ResponsiveContainer>
       <p className="text-xs text-gray-500 mt-1">
         Data from <a href="https://arxiv.org/abs/2507.16590" target="_blank" rel="noopener" className="text-blue-400 hover:underline">Cereskaite et al. (2025)</a>. 
