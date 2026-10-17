@@ -569,8 +569,8 @@ function DESIDataPanel({ plotMode, plotLabel }: { plotMode: string; plotLabel: s
             }}
           />
           <Legend wrapperStyle={{ fontSize: 11 }} />
-          <Scatter name="CMB (Planck 2018)" data={cmbData} fill="#8B5CF6" shape="circle" line={{ stroke: '#8B5CF6', strokeWidth: 1 }} />
-          <Scatter name="DESI DR1 GC (all tracers)" data={desiData} fill="#10B981" shape="diamond" line={{ stroke: '#10B981', strokeWidth: 1 }} />
+          <Scatter name="CMB (Planck 2018)" data={cmbData} fill="#8B5CF6" shape="circle" />
+          <Scatter name="DESI DR1 GC (all tracers)" data={desiData} fill="#10B981" shape="diamond" />
         </ScatterChart>
       </ResponsiveContainer>
       <p className="text-xs text-gray-500 mt-1">
