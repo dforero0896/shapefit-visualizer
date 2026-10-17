@@ -436,6 +436,11 @@ export interface PowerSpectrumResult {
   kPk3: number[];
   kPk3_nl_fid: number[];
   kPk3_nl: number[];
+  r: number[];
+  xi_fid: number[];
+  xi: number[];
+  xi_nl_fid: number[];
+  xi_nl: number[];
   f: number;
   sigma8_z: number;
 }
@@ -495,6 +500,13 @@ export function computePowerSpectrum(
   // sigma8 at z
   const sigma8_z = cosmo.sigma8 * Dz;
   
+  // Compute correlation functions
+  const r = generateRGrid(1, 200, 200);
+  const xi_fid = computeCorrelationFunction(k, pk_fid, r);
+  const xi = computeCorrelationFunction(k, pk, r);
+  const xi_nl_fid = computeCorrelationFunction(k, pk_nl_fid, r);
+  const xi_nl = computeCorrelationFunction(k, pk_nl, r);
+  
   return {
     k,
     pk_fid,
@@ -511,7 +523,66 @@ export function computePowerSpectrum(
     kPk3: k.map((ki, i) => ki * ki * ki * pk[i] / (2 * Math.PI * Math.PI)),
     kPk3_nl_fid: k.map((ki, i) => ki * ki * ki * pk_nl_fid[i] / (2 * Math.PI * Math.PI)),
     kPk3_nl: k.map((ki, i) => ki * ki * ki * pk_nl[i] / (2 * Math.PI * Math.PI)),
+    r,
+    xi_fid,
+    xi,
+    xi_nl_fid,
+    xi_nl,
     f,
     sigma8_z,
   };
+}
+
+/**
+ * Compute two-point correlation function ξ(r) from power spectrum P(k)
+ * using Hankel transform: ξ(r) = (1/2π²) ∫ k² P(k) j₀(kr) dk
+ * where j₀(x) = sin(x)/x
+ */
+export function computeCorrelationFunction(k: number[], pk: number[], r: number[]): number[] {
+  const xi = new Array(r.length).fill(0);
+  
+  for (let ir = 0; ir < r.length; ir++) {
+    const ri = r[ir];
+    let integral = 0;
+    
+    // Trapezoidal integration
+    for (let ik = 0; ik < k.length - 1; ik++) {
+      const k1 = k[ik];
+      const k2 = k[ik + 1];
+      const pk1 = pk[ik];
+      const pk2 = pk[ik + 1];
+      
+      // Spherical Bessel function j₀(x) = sin(x)/x
+      const x1 = k1 * ri;
+      const x2 = k2 * ri;
+      const j0_1 = x1 < 1e-6 ? 1 - x1*x1/6 : Math.sin(x1) / x1;
+      const j0_2 = x2 < 1e-6 ? 1 - x2*x2/6 : Math.sin(x2) / x2;
+      
+      // Integrand: k² P(k) j₀(kr)
+      const integrand1 = k1 * k1 * pk1 * j0_1;
+      const integrand2 = k2 * k2 * pk2 * j0_2;
+      
+      integral += 0.5 * (integrand1 + integrand2) * (k2 - k1);
+    }
+    
+    xi[ir] = integral / (2 * Math.PI * Math.PI);
+  }
+  
+  return xi;
+}
+
+/**
+ * Generate r grid for correlation function (logarithmically spaced)
+ */
+export function generateRGrid(rmin: number = 1, rmax: number = 200, n: number = 200): number[] {
+  const r: number[] = [];
+  const log_rmin = Math.log10(rmin);
+  const log_rmax = Math.log10(rmax);
+  
+  for (let i = 0; i < n; i++) {
+    const log_r = log_rmin + (log_rmax - log_rmin) * i / (n - 1);
+    r.push(Math.pow(10, log_r));
+  }
+  
+  return r;
 }

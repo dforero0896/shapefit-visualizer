@@ -159,6 +159,30 @@ export default function App() {
     }));
   }, [chartData]);
 
+  // Prepare correlation function data
+  const correlationData = useMemo(() => {
+    const { r, xi_fid, xi, xi_nl_fid, xi_nl } = result;
+    
+    return r.map((ri, i) => ({
+      r: ri,
+      xi_fid: xi_fid[i],
+      xi: xi[i],
+      xi_nl_fid: xi_nl_fid[i],
+      xi_nl: xi_nl[i],
+    }));
+  }, [result]);
+
+  // Prepare correlation function ratio data
+  const correlationRatioData = useMemo(() => {
+    const { r, xi_fid, xi, xi_nl_fid, xi_nl } = result;
+    
+    return r.map((ri, i) => ({
+      r: ri,
+      ratio: xi[i] / xi_fid[i],
+      ratio_nl: xi_nl[i] / xi_nl_fid[i],
+    }));
+  }, [result]);
+
   const plotLabel = (useNonlinear ? 'Nonlinear ' : 'Linear ') + 
                     (plotMode === 'pk' ? 'P(k) [(Mpc/h)³]' :
                      plotMode === 'kpk' ? 'k·P(k) [(Mpc/h)²]' :
@@ -428,6 +452,85 @@ export default function App() {
             )}
           </div>
 
+          {/* Correlation Function Plot */}
+          <div className="bg-gray-800 rounded-xl border border-gray-700 p-4 mb-4 shadow-xl">
+            <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-purple-500"></span>
+              Two-Point Correlation Function ξ(r)
+              <span className="text-xs text-gray-500">(Hankel transform of P(k))</span>
+            </h3>
+            <ResponsiveContainer width="100%" height={350}>
+              <LineChart data={correlationData} margin={{ top: 10, right: 30, left: 20, bottom: 20 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+                <XAxis
+                  dataKey="r"
+                  scale="log"
+                  domain={[1, 200]}
+                  ticks={[1, 2, 5, 10, 20, 50, 100, 200]}
+                  tickFormatter={(v) => v.toString()}
+                  stroke="#6B7280"
+                  label={{ value: 'r [Mpc/h]', position: 'bottom', offset: 0, style: { fill: '#9CA3AF', fontSize: 12 } }}
+                />
+                <YAxis
+                  scale="log"
+                  domain={['auto', 'auto']}
+                  stroke="#6B7280"
+                  tickFormatter={(v) => v.toExponential(1)}
+                  label={{ value: 'ξ(r)', angle: -90, position: 'insideLeft', offset: -5, style: { fill: '#9CA3AF', fontSize: 11 } }}
+                />
+                <Tooltip
+                  contentStyle={{ backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '8px', fontSize: 12 }}
+                  labelFormatter={(v) => `r = ${(v as number).toFixed(1)} Mpc/h`}
+                  formatter={(value: number, name: string) => [value.toExponential(3), name]}
+                />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Line type="monotone" dataKey="xi_fid" name="ξ_fid(r)" stroke="#60A5FA" strokeWidth={2.5} dot={false} />
+                <Line type="monotone" dataKey="xi" name="ξ(r) [modified]" stroke="#F87171" strokeWidth={2.5} dot={false} />
+                <Line type="monotone" dataKey="xi_nl_fid" name="ξ_nl,fid(r)" stroke="#60A5FA" strokeWidth={1.5} strokeDasharray="6 3" dot={false} />
+                <Line type="monotone" dataKey="xi_nl" name="ξ_nl(r) [modified]" stroke="#F87171" strokeWidth={1.5} strokeDasharray="6 3" dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+            <p className="text-xs text-gray-500 mt-2">
+              The correlation function ξ(r) is the Fourier transform of P(k). The BAO peak appears at r ≈ 100 Mpc/h.
+            </p>
+          </div>
+
+          {/* Correlation Function Ratio Plot */}
+          <div className="bg-gray-800 rounded-xl border border-gray-700 p-4 mb-4 shadow-xl">
+            <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-pink-500"></span>
+              Correlation Function Ratio: ξ(r) / ξ_fid(r)
+            </h3>
+            <ResponsiveContainer width="100%" height={250}>
+              <LineChart data={correlationRatioData} margin={{ top: 10, right: 30, left: 20, bottom: 20 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+                <XAxis
+                  dataKey="r"
+                  scale="log"
+                  domain={[1, 200]}
+                  ticks={[1, 2, 5, 10, 20, 50, 100, 200]}
+                  tickFormatter={(v) => v.toString()}
+                  stroke="#6B7280"
+                  label={{ value: 'r [Mpc/h]', position: 'bottom', offset: 0, style: { fill: '#9CA3AF', fontSize: 12 } }}
+                />
+                <YAxis
+                  domain={[0.5, 1.5]}
+                  stroke="#6B7280"
+                  tickFormatter={(v) => v.toFixed(2)}
+                  label={{ value: 'Ratio', angle: -90, position: 'insideLeft', offset: -5, style: { fill: '#9CA3AF', fontSize: 11 } }}
+                />
+                <Tooltip
+                  contentStyle={{ backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '8px', fontSize: 12 }}
+                  labelFormatter={(v) => `r = ${(v as number).toFixed(1)} Mpc/h`}
+                  formatter={(value: number) => [value.toFixed(4), 'ξ/ξ_fid']}
+                />
+                <ReferenceLine y={1} stroke="#4B5563" strokeDasharray="3 3" strokeWidth={1.5} />
+                <Line type="monotone" dataKey="ratio" name="ξ(r)/ξ_fid(r)" stroke="#F87171" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="ratio_nl" name="ξ_nl(r)/ξ_nl,fid(r)" stroke="#F97316" strokeWidth={2} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+
           {/* Ratio Plot */}
           <div className="bg-gray-800 rounded-xl border border-gray-700 p-4 mb-4 shadow-xl">
             <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
@@ -483,17 +586,22 @@ export default function App() {
             <h4 className="text-sm font-semibold text-gray-300 mb-2">About</h4>
             <div className="text-xs text-gray-400 space-y-2">
               <p>
-                This app computes the matter power spectrum P(k) using:
+                This app computes the matter power spectrum P(k) and two-point correlation function ξ(r) using:
               </p>
               <ul className="list-disc list-inside space-y-1 ml-2">
                 <li><b>Linear:</b> Eisenstein & Hu (1998) zero-baryon transfer function + Syren (Bartlett et al. 2023) correction for BAO wiggles</li>
                 <li><b>Nonlinear:</b> SYREN-HALOFIT (Bartlett et al. 2024) — symbolic regression-enhanced halofit model</li>
                 <li><b>ShapeFit template</b> from desilike/shapefit-prime to parameterize spectral modifications</li>
+                <li><b>Correlation function:</b> Hankel transform ξ(r) = (1/2π²) ∫ k² P(k) j₀(kr) dk computed via numerical integration</li>
               </ul>
               <p>
                 The ShapeFit approach separates P(k) into a smooth no-wiggle component and a wiggle factor W(k) = P_fid/P_now,fid,
                 each controlled by physically-motivated parameters (δm, δn, δγ, etc.). This enables efficient extraction of 
                 cosmological information from galaxy clustering without running a Boltzmann solver at each step.
+              </p>
+              <p>
+                The correlation function ξ(r) is the Fourier transform of P(k) and provides a complementary view of the same physics.
+                The BAO peak appears at r ≈ 100 Mpc/h, corresponding to the sound horizon at the drag epoch.
               </p>
               <p>
                 The DESI DR1 data points (Cereskaite et al. 2025) represent the reconstructed <b>nonlinear</b> matter power spectrum 
