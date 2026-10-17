@@ -436,14 +436,6 @@ export interface PowerSpectrumResult {
   kPk3: number[];
   kPk3_nl_fid: number[];
   kPk3_nl: number[];
-  r: number[];
-  xi_fid: number[];
-  xi: number[];
-  xi_nl_fid: number[];
-  xi_nl: number[];
-  k_bispectrum: number[];
-  bispectrum_fid: number[];
-  bispectrum: number[];
   f: number;
   sigma8_z: number;
 }
@@ -503,33 +495,6 @@ export function computePowerSpectrum(
   // sigma8 at z
   const sigma8_z = cosmo.sigma8 * Dz;
   
-  // Compute correlation functions using very extended k-grid
-  // Need very small k_min and very large k_max with fine sampling for accurate integration
-  const k_xi = generateKGrid(1e-6, 1000.0, 10000);
-  
-  // Interpolate power spectra to extended k-grid
-  const pk_fid_xi = interpolatePowerSpectrum(k, pk_fid, k_xi);
-  const pk_xi = interpolatePowerSpectrum(k, pk, k_xi);
-  const pk_nl_fid_xi = interpolatePowerSpectrum(k, pk_nl_fid, k_xi);
-  const pk_nl_xi = interpolatePowerSpectrum(k, pk_nl, k_xi);
-  
-  const r = generateRGrid(1, 200, 200);
-  const xi_fid = computeCorrelationFunction(k_xi, pk_fid_xi, r);
-  const xi = computeCorrelationFunction(k_xi, pk_xi, r);
-  const xi_nl_fid = computeCorrelationFunction(k_xi, pk_nl_fid_xi, r);
-  const xi_nl = computeCorrelationFunction(k_xi, pk_nl_xi, r);
-  
-  // Compute tree-level bispectrum for isosceles right triangle (k1, k1, k1*√2)
-  // Scale by k1*k2*k3 = k1*k1*(k1*sqrt(2)) = k1^3 * sqrt(2)
-  const k_bispectrum = generateKGrid(0.01, 0.3, 100);
-  const bispectrum_fid_raw = computeTreeLevelBispectrum(k_bispectrum, pk_fid, 1.0, Math.sqrt(2));
-  const bispectrum_raw = computeTreeLevelBispectrum(k_bispectrum, pk, 1.0, Math.sqrt(2));
-  
-  // Scale by k1*k2*k3
-  const sqrt2 = Math.sqrt(2);
-  const bispectrum_fid = k_bispectrum.map((k1, i) => bispectrum_fid_raw[i] * k1 * k1 * k1 * sqrt2);
-  const bispectrum = k_bispectrum.map((k1, i) => bispectrum_raw[i] * k1 * k1 * k1 * sqrt2);
-  
   return {
     k,
     pk_fid,
@@ -546,180 +511,9 @@ export function computePowerSpectrum(
     kPk3: k.map((ki, i) => ki * ki * ki * pk[i] / (2 * Math.PI * Math.PI)),
     kPk3_nl_fid: k.map((ki, i) => ki * ki * ki * pk_nl_fid[i] / (2 * Math.PI * Math.PI)),
     kPk3_nl: k.map((ki, i) => ki * ki * ki * pk_nl[i] / (2 * Math.PI * Math.PI)),
-    r,
-    xi_fid,
-    xi,
-    xi_nl_fid,
-    xi_nl,
-    k_bispectrum,
-    bispectrum_fid,
-    bispectrum,
     f,
     sigma8_z,
   };
 }
 
-/**
- * Interpolate power spectrum to a new k-grid using log-log interpolation
- */
-function interpolatePowerSpectrum(k_old: number[], pk_old: number[], k_new: number[]): number[] {
-  const pk_new = new Array(k_new.length).fill(0);
-  
-  for (let i = 0; i < k_new.length; i++) {
-    const k = k_new[i];
-    
-    // Find bracketing indices
-    if (k <= k_old[0]) {
-      pk_new[i] = pk_old[0];
-    } else if (k >= k_old[k_old.length - 1]) {
-      pk_new[i] = pk_old[k_old.length - 1];
-    } else {
-      // Binary search for interval
-      let lo = 0, hi = k_old.length - 1;
-      while (hi - lo > 1) {
-        const mid = (lo + hi) >> 1;
-        if (k_old[mid] <= k) lo = mid;
-        else hi = mid;
-      }
-      
-      // Log-log interpolation
-      const t = (Math.log(k) - Math.log(k_old[lo])) / (Math.log(k_old[hi]) - Math.log(k_old[lo]));
-      const log_pk = Math.log(pk_old[lo]) + t * (Math.log(pk_old[hi]) - Math.log(pk_old[lo]));
-      pk_new[i] = Math.exp(log_pk);
-    }
-  }
-  
-  return pk_new;
-}
 
-
-
-/**
- * Compute two-point correlation function ξ(s) from power spectrum P(k)
- * using direct integration with trapezoidal rule:
- * ξ(s) = (1/2π²) ∫ k² P(k) j₀(ks) dk
- * where j₀(x) = sin(x)/x
- * 
- * Returns s²*ξ(s) for better visualization
- */
-export function computeCorrelationFunction(k: number[], pk: number[], s: number[]): number[] {
-  const xi_scaled = new Array(s.length).fill(0);
-  
-  for (let is = 0; is < s.length; is++) {
-    const si = s[is];
-    const N = k.length;
-    
-    let integral = 0;
-    
-    // Trapezoidal rule for log-spaced k grid
-    for (let i = 0; i < N - 1; i++) {
-      const k1 = k[i];
-      const k2 = k[i + 1];
-      const pk1 = pk[i];
-      const pk2 = pk[i + 1];
-      
-      // Spherical Bessel function j₀(x) = sin(x)/x
-      const x1 = k1 * si;
-      const x2 = k2 * si;
-      const j0_1 = x1 < 1e-6 ? 1 - x1*x1/6 : Math.sin(x1) / x1;
-      const j0_2 = x2 < 1e-6 ? 1 - x2*x2/6 : Math.sin(x2) / x2;
-      
-      // Integrand: k² P(k) j₀(ks)
-      const f1 = k1 * k1 * pk1 * j0_1;
-      const f2 = k2 * k2 * pk2 * j0_2;
-      
-      // Trapezoidal rule
-      const dk = k2 - k1;
-      integral += 0.5 * (f1 + f2) * dk;
-    }
-    
-    // ξ(s) = integral / (2π²)
-    const xi = integral / (2 * Math.PI * Math.PI);
-    
-    // Return s²*ξ(s) for better visualization
-    // Guard against NaN/Infinity
-    if (isFinite(xi)) {
-      xi_scaled[is] = si * si * xi;
-    } else {
-      xi_scaled[is] = 0;
-    }
-  }
-  
-  return xi_scaled;
-}
-
-/**
- * Generate r grid for correlation function (logarithmically spaced)
- */
-export function generateRGrid(rmin: number = 1, rmax: number = 200, n: number = 200): number[] {
-  const r: number[] = [];
-  const log_rmin = Math.log10(rmin);
-  const log_rmax = Math.log10(rmax);
-  
-  for (let i = 0; i < n; i++) {
-    const log_r = log_rmin + (log_rmax - log_rmin) * i / (n - 1);
-    r.push(Math.pow(10, log_r));
-  }
-  
-  return r;
-}
-
-/**
- * Compute second-order perturbation theory kernel F2(k1, k2)
- * F2(k1, k2) = 5/7 + (1/2)(k1·k2)(1/k1² + 1/k2²) + (2/7)(k1·k2)²/(k1²k2²)
- */
-function F2kernel(k1: number, k2: number, cosAngle: number): number {
-  const k1k2 = k1 * k2 * cosAngle;
-  const k1sq = k1 * k1;
-  const k2sq = k2 * k2;
-  
-  return 5/7 + 0.5 * k1k2 * (1/k1sq + 1/k2sq) + (2/7) * k1k2 * k1k2 / (k1sq * k2sq);
-}
-
-/**
- * Compute tree-level bispectrum B(k1, k2, k3)
- * B(k1, k2, k3) = 2[F2(k1,k2)P(k1)P(k2) + F2(k2,k3)P(k2)P(k3) + F2(k1,k3)P(k1)P(k3)]
- * 
- * For a triangle configuration with k1 + k2 + k3 = 0:
- * cos(k1,k2) = (k3² - k1² - k2²) / (2*k1*k2)
- */
-export function computeTreeLevelBispectrum(
-  k: number[],
-  pk: number[],
-  k2_ratio: number = 1.0,  // k2/k1 ratio
-  k3_ratio: number = 1.414 // k3/k1 ratio (√2 for isosceles right triangle)
-): number[] {
-  const bispectrum = new Array(k.length).fill(0);
-  
-  for (let i = 0; i < k.length; i++) {
-    const k1 = k[i];
-    const k2 = k1 * k2_ratio;
-    const k3 = k1 * k3_ratio;
-    
-    // Interpolate P(k) at k2 and k3
-    const pk1 = pk[i];
-    const pk2 = interpolatePowerSpectrum(k, pk, [k2])[0];
-    const pk3 = interpolatePowerSpectrum(k, pk, [k3])[0];
-    
-    // Compute angles from triangle condition: k1 + k2 + k3 = 0
-    // cos(k1,k2) = (k3² - k1² - k2²) / (2*k1*k2)
-    const cos12 = (k3*k3 - k1*k1 - k2*k2) / (2 * k1 * k2);
-    const cos23 = (k1*k1 - k2*k2 - k3*k3) / (2 * k2 * k3);
-    const cos13 = (k2*k2 - k1*k1 - k3*k3) / (2 * k1 * k3);
-    
-    // Clamp cosines to [-1, 1] to avoid numerical issues
-    const cos12_clamped = Math.max(-1, Math.min(1, cos12));
-    const cos23_clamped = Math.max(-1, Math.min(1, cos23));
-    const cos13_clamped = Math.max(-1, Math.min(1, cos13));
-    
-    // Compute F2 kernels
-    const F2_12 = F2kernel(k1, k2, cos12_clamped);
-    const F2_23 = F2kernel(k2, k3, cos23_clamped);
-    const F2_13 = F2kernel(k1, k3, cos13_clamped);
-    
-    // Tree-level bispectrum
-    bispectrum[i] = 2 * (F2_12 * pk1 * pk2 + F2_23 * pk2 * pk3 + F2_13 * pk1 * pk3);
-  }
-  
-  return bispectrum;
-}
