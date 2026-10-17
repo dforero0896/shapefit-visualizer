@@ -563,36 +563,29 @@ function DESIDataPanel({ plotMode, plotLabel, result, useNonlinear }: {
   result: PowerSpectrumResult;
   useNonlinear: boolean;
 }) {
-  // Transform DESI data to match the current plot mode
-  const transformedData = desiDR1Data.map(d => {
-    let y: number, yErr: number;
-    if (plotMode === 'pk') {
-      y = d.pk;
-      yErr = d.err;
-    } else if (plotMode === 'kpk') {
-      y = d.k * d.pk;
-      yErr = d.k * d.err;
-    } else {
-      // dkpk = k^3 * P(k) / (2π²)
-      const factor = d.k * d.k * d.k / (2 * Math.PI * Math.PI);
-      y = factor * d.pk;
-      yErr = factor * d.err;
-    }
-    return { ...d, y, yErr };
-  });
+  // Prepare all data using useMemo to avoid recalculation
+  const { transformedData, theoryData } = useMemo(() => {
+    // Transform DESI data to match the current plot mode
+    const transformed = desiDR1Data.map(d => {
+      let y: number, yErr: number;
+      if (plotMode === 'pk') {
+        y = d.pk;
+        yErr = d.err;
+      } else if (plotMode === 'kpk') {
+        y = d.k * d.pk;
+        yErr = d.k * d.err;
+      } else {
+        // dkpk = k^3 * P(k) / (2π²)
+        const factor = d.k * d.k * d.k / (2 * Math.PI * Math.PI);
+        y = factor * d.pk;
+        yErr = factor * d.err;
+      }
+      return { ...d, y, yErr };
+    });
 
-  const cmbData = transformedData.filter(d => d.source === 'CMB');
-  const desiData = transformedData.filter(d => d.source === 'DESI');
-
-  // Prepare theory curves at z=0 (to match DESI data)
-  const theoryData = useMemo(() => {
-    const { k, pk_nl_fid, pk_nl, pk_fid, pk } = result;
+    // Prepare theory curves at z=0 (to match DESI data)
+    const { k, pk_nl_fid, pk_nl, pk_fid } = result;
     
-    // Compute fiducial nonlinear at z=0
-    const fiducialResult = computePowerSpectrum(DEFAULT_COSMO, DEFAULT_SHAPEFIT, 0);
-    const { k: k_fid, pk_nl_fid: pk_nl_fid_z0, pk_fid: pk_fid_z0 } = fiducialResult;
-    
-    // Filter to k range matching DESI data
     const theoryPoints: { k: number; linear_fid: number; linear_mod: number; nonlinear_fid: number; nonlinear_mod: number }[] = [];
     
     for (let i = 0; i < k.length; i++) {
@@ -603,19 +596,19 @@ function DESIDataPanel({ plotMode, plotLabel, result, useNonlinear }: {
       
       if (plotMode === 'pk') {
         linear_fid = pk_fid[i];
-        linear_mod = result.pk_fid[i]; // This is the modified linear
+        linear_mod = result.pk[i];
         nonlinear_fid = pk_nl_fid[i];
         nonlinear_mod = pk_nl[i];
       } else if (plotMode === 'kpk') {
         linear_fid = ki * pk_fid[i];
-        linear_mod = ki * result.pk_fid[i];
+        linear_mod = ki * result.pk[i];
         nonlinear_fid = ki * pk_nl_fid[i];
         nonlinear_mod = ki * pk_nl[i];
       } else {
         // dkpk
         const factor = ki * ki * ki / (2 * Math.PI * Math.PI);
         linear_fid = factor * pk_fid[i];
-        linear_mod = factor * result.pk_fid[i];
+        linear_mod = factor * result.pk[i];
         nonlinear_fid = factor * pk_nl_fid[i];
         nonlinear_mod = factor * pk_nl[i];
       }
@@ -623,8 +616,11 @@ function DESIDataPanel({ plotMode, plotLabel, result, useNonlinear }: {
       theoryPoints.push({ k: ki, linear_fid, linear_mod, nonlinear_fid, nonlinear_mod });
     }
     
-    return theoryPoints;
+    return { transformedData: transformed, theoryData: theoryPoints };
   }, [result, plotMode]);
+
+  const cmbData = transformedData.filter(d => d.source === 'CMB');
+  const desiData = transformedData.filter(d => d.source === 'DESI');
 
   return (
     <div className="mt-3 border-t border-gray-700 pt-3">
