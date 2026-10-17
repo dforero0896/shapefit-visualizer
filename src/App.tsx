@@ -10,6 +10,7 @@ import {
   DEFAULT_SHAPEFIT,
   type CosmoParams,
   type ShapeFitParams,
+  type PowerSpectrumResult,
 } from './powerSpectrum';
 
 // ─── Slider Component ───────────────────────────────────────────────────────
@@ -423,7 +424,7 @@ export default function App() {
             
             {/* DESI Data Points Overlay */}
             {showDESI && (
-              <DESIDataPanel plotMode={plotMode} plotLabel={plotLabel} />
+              <DESIDataPanel plotMode={plotMode} plotLabel={plotLabel} result={result} useNonlinear={useNonlinear} />
             )}
           </div>
 
@@ -556,7 +557,12 @@ function CosmoEffectPlot({ cosmo, plotMode }: { cosmo: CosmoParams; plotMode: st
 
 // ─── DESI Data Panel ────────────────────────────────────────────────────────
 
-function DESIDataPanel({ plotMode, plotLabel }: { plotMode: string; plotLabel: string }) {
+function DESIDataPanel({ plotMode, plotLabel, result, useNonlinear }: { 
+  plotMode: string; 
+  plotLabel: string; 
+  result: PowerSpectrumResult;
+  useNonlinear: boolean;
+}) {
   // Transform DESI data to match the current plot mode
   const transformedData = desiDR1Data.map(d => {
     let y: number, yErr: number;
@@ -578,12 +584,54 @@ function DESIDataPanel({ plotMode, plotLabel }: { plotMode: string; plotLabel: s
   const cmbData = transformedData.filter(d => d.source === 'CMB');
   const desiData = transformedData.filter(d => d.source === 'DESI');
 
+  // Prepare theory curves at z=0 (to match DESI data)
+  const theoryData = useMemo(() => {
+    const { k, pk_nl_fid, pk_nl, pk_fid, pk } = result;
+    
+    // Compute fiducial nonlinear at z=0
+    const fiducialResult = computePowerSpectrum(DEFAULT_COSMO, DEFAULT_SHAPEFIT, 0);
+    const { k: k_fid, pk_nl_fid: pk_nl_fid_z0, pk_fid: pk_fid_z0 } = fiducialResult;
+    
+    // Filter to k range matching DESI data
+    const theoryPoints: { k: number; linear_fid: number; linear_mod: number; nonlinear_fid: number; nonlinear_mod: number }[] = [];
+    
+    for (let i = 0; i < k.length; i++) {
+      const ki = k[i];
+      if (ki < 0.0002 || ki > 0.2) continue;
+      
+      let linear_fid: number, linear_mod: number, nonlinear_fid: number, nonlinear_mod: number;
+      
+      if (plotMode === 'pk') {
+        linear_fid = pk_fid[i];
+        linear_mod = result.pk_fid[i]; // This is the modified linear
+        nonlinear_fid = pk_nl_fid[i];
+        nonlinear_mod = pk_nl[i];
+      } else if (plotMode === 'kpk') {
+        linear_fid = ki * pk_fid[i];
+        linear_mod = ki * result.pk_fid[i];
+        nonlinear_fid = ki * pk_nl_fid[i];
+        nonlinear_mod = ki * pk_nl[i];
+      } else {
+        // dkpk
+        const factor = ki * ki * ki / (2 * Math.PI * Math.PI);
+        linear_fid = factor * pk_fid[i];
+        linear_mod = factor * result.pk_fid[i];
+        nonlinear_fid = factor * pk_nl_fid[i];
+        nonlinear_mod = factor * pk_nl[i];
+      }
+      
+      theoryPoints.push({ k: ki, linear_fid, linear_mod, nonlinear_fid, nonlinear_mod });
+    }
+    
+    return theoryPoints;
+  }, [result, plotMode]);
+
   return (
     <div className="mt-3 border-t border-gray-700 pt-3">
       <h4 className="text-xs font-semibold text-gray-400 mb-2">
         DESI DR1 + Planck CMB data (Cereskaite et al. 2025, arXiv:2507.16590) — z=0 nonlinear reconstruction
       </h4>
-      <ResponsiveContainer width="100%" height={220}>
+      <ResponsiveContainer width="100%" height={280}>
         <ScatterChart margin={{ top: 10, right: 30, left: 20, bottom: 20 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
           <XAxis
@@ -615,6 +663,14 @@ function DESIDataPanel({ plotMode, plotLabel }: { plotMode: string; plotLabel: s
             }}
           />
           <Legend wrapperStyle={{ fontSize: 11 }} />
+          
+          {/* Theory curves */}
+          <Line type="monotone" dataKey="linear_fid" data={theoryData} stroke="#60A5FA" strokeWidth={1.5} strokeDasharray="5 5" dot={false} name="Linear (fiducial)" />
+          <Line type="monotone" dataKey="linear_mod" data={theoryData} stroke="#60A5FA" strokeWidth={2} dot={false} name="Linear (modified)" />
+          <Line type="monotone" dataKey="nonlinear_fid" data={theoryData} stroke="#F97316" strokeWidth={1.5} strokeDasharray="5 5" dot={false} name="Nonlinear (fiducial)" />
+          <Line type="monotone" dataKey="nonlinear_mod" data={theoryData} stroke="#F97316" strokeWidth={2} dot={false} name="Nonlinear (modified)" />
+          
+          {/* Data points */}
           <Scatter name="CMB (Planck 2018)" data={cmbData} fill="#8B5CF6" shape="circle" />
           <Scatter name="DESI DR1 GC (all tracers)" data={desiData} fill="#10B981" shape="diamond" />
         </ScatterChart>
@@ -622,7 +678,7 @@ function DESIDataPanel({ plotMode, plotLabel }: { plotMode: string; plotLabel: s
       <p className="text-xs text-gray-500 mt-1">
         Data from <a href="https://arxiv.org/abs/2507.16590" target="_blank" rel="noopener" className="text-blue-400 hover:underline">Cereskaite et al. (2025)</a>. 
         Full data: <a href="https://zenodo.org/records/19788154" target="_blank" rel="noopener" className="text-blue-400 hover:underline">Zenodo</a>. 
-        Points shown are representative; error bars indicate 1σ uncertainties.
+        Points shown are representative; error bars indicate 1σ uncertainties. Theory curves show both linear (blue) and nonlinear (orange) predictions.
       </p>
     </div>
   );
