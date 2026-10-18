@@ -492,38 +492,49 @@ export function computePowerSpectrum(
   shapefit: ShapeFitParams,
   z: number = 0.0
 ): PowerSpectrumResult {
-  // Focus on k = 0.02 to 0.5 as requested, with some padding
-  const k = generateKGrid(0.005, 0.5, 500);
+  // Generate wide k-grid for computation to avoid edge effects when ShapeFit shifts spectrum
+  const k_wide = generateKGrid(1e-4, 10.0, 800);
   
-  // Compute fiducial no-wiggle spectrum (EH98 zero-baryon)
-  const T_nw_fid = transferEH98NoWiggle(k, cosmo);
-  const pknow_fid_z0 = k.map((ki, i) => Math.pow(ki, cosmo.n_s) * T_nw_fid[i] * T_nw_fid[i]);
+  // Display range (what we actually plot)
+  const k_display = generateKGrid(0.005, 0.5, 500);
+  
+  // Compute fiducial no-wiggle spectrum (EH98 zero-baryon) on wide grid
+  const T_nw_fid = transferEH98NoWiggle(k_wide, cosmo);
+  const pknow_fid_z0 = k_wide.map((ki, i) => Math.pow(ki, cosmo.n_s) * T_nw_fid[i] * T_nw_fid[i]);
   
   // Normalize no-wiggle to sigma8
-  const s8sq_nw = sigma8Squared(k, pknow_fid_z0, 8.0);
+  const s8sq_nw = sigma8Squared(k_wide, pknow_fid_z0, 8.0);
   const norm_nw = (cosmo.sigma8 * cosmo.sigma8) / s8sq_nw;
   const pknow_fid_z0_norm = pknow_fid_z0.map(p => p * norm_nw);
   
-  // Compute full fiducial spectrum with Syren correction
-  const pk_fid_z0 = computeLinearPk(k, cosmo);
+  // Compute full fiducial spectrum with Syren correction on wide grid
+  const pk_fid_z0 = computeLinearPk(k_wide, cosmo);
   
-  // Apply ShapeFit template at z=0
-  const { pk: pk_z0, pknow: pknow_z0 } = applyShapeFit(k, pk_fid_z0, pknow_fid_z0_norm, shapefit);
+  // Apply ShapeFit template at z=0 on wide grid
+  const { pk: pk_z0, pknow: pknow_z0 } = applyShapeFit(k_wide, pk_fid_z0, pknow_fid_z0_norm, shapefit);
   
   // Scale to redshift z
   const Dz = growthD(z, cosmo.omega_m);
   const Dz2 = Dz * Dz;
   
-  const pk_fid = pk_fid_z0.map(p => p * Dz2);
-  const pknow_fid = pknow_fid_z0_norm.map(p => p * Dz2);
-  const pk = pk_z0.map(p => p * Dz2);
-  const pknow = pknow_z0.map(p => p * Dz2);
+  const pk_fid_wide = pk_fid_z0.map(p => p * Dz2);
+  const pknow_fid_wide = pknow_fid_z0_norm.map(p => p * Dz2);
+  const pk_wide = pk_z0.map(p => p * Dz2);
+  const pknow_wide = pknow_z0.map(p => p * Dz2);
   
-  // Compute nonlinear spectra
-  const pk_nl_fid_z0 = computeNonlinearPk(k, cosmo, 0.0);
-  const { pk: pk_nl_z0 } = applyShapeFit(k, pk_nl_fid_z0, pknow_fid_z0_norm, shapefit);
-  const pk_nl_fid = pk_nl_fid_z0.map(p => p * Dz2);
-  const pk_nl = pk_nl_z0.map(p => p * Dz2);
+  // Compute nonlinear spectra on wide grid
+  const pk_nl_fid_z0 = computeNonlinearPk(k_wide, cosmo, 0.0);
+  const { pk: pk_nl_z0 } = applyShapeFit(k_wide, pk_nl_fid_z0, pknow_fid_z0_norm, shapefit);
+  const pk_nl_fid_wide = pk_nl_fid_z0.map(p => p * Dz2);
+  const pk_nl_wide = pk_nl_z0.map(p => p * Dz2);
+  
+  // Interpolate to display range
+  const pk_fid = k_display.map(ki => interpLog(k_wide, pk_fid_wide, ki));
+  const pknow_fid = k_display.map(ki => interpLog(k_wide, pknow_fid_wide, ki));
+  const pk = k_display.map(ki => interpLog(k_wide, pk_wide, ki));
+  const pknow = k_display.map(ki => interpLog(k_wide, pknow_wide, ki));
+  const pk_nl_fid = k_display.map(ki => interpLog(k_wide, pk_nl_fid_wide, ki));
+  const pk_nl = k_display.map(ki => interpLog(k_wide, pk_nl_wide, ki));
   
   // Growth rate (modified by ShapeFit df and dA)
   const f0 = growthRateF(z, cosmo.omega_m);
@@ -533,21 +544,21 @@ export function computePowerSpectrum(
   const sigma8_z = cosmo.sigma8 * Dz;
   
   return {
-    k,
+    k: k_display,
     pk_fid,
     pknow_fid,
     pk,
     pknow,
     pk_nl_fid,
     pk_nl,
-    kPk_fid: k.map((ki, i) => ki * pk_fid[i]),
-    kPk: k.map((ki, i) => ki * pk[i]),
-    kPk_nl_fid: k.map((ki, i) => ki * pk_nl_fid[i]),
-    kPk_nl: k.map((ki, i) => ki * pk_nl[i]),
-    kPk3_fid: k.map((ki, i) => ki * ki * ki * pk_fid[i] / (2 * Math.PI * Math.PI)),
-    kPk3: k.map((ki, i) => ki * ki * ki * pk[i] / (2 * Math.PI * Math.PI)),
-    kPk3_nl_fid: k.map((ki, i) => ki * ki * ki * pk_nl_fid[i] / (2 * Math.PI * Math.PI)),
-    kPk3_nl: k.map((ki, i) => ki * ki * ki * pk_nl[i] / (2 * Math.PI * Math.PI)),
+    kPk_fid: k_display.map((ki, i) => ki * pk_fid[i]),
+    kPk: k_display.map((ki, i) => ki * pk[i]),
+    kPk_nl_fid: k_display.map((ki, i) => ki * pk_nl_fid[i]),
+    kPk_nl: k_display.map((ki, i) => ki * pk_nl[i]),
+    kPk3_fid: k_display.map((ki, i) => ki * ki * ki * pk_fid[i] / (2 * Math.PI * Math.PI)),
+    kPk3: k_display.map((ki, i) => ki * ki * ki * pk[i] / (2 * Math.PI * Math.PI)),
+    kPk3_nl_fid: k_display.map((ki, i) => ki * ki * ki * pk_nl_fid[i] / (2 * Math.PI * Math.PI)),
+    kPk3_nl: k_display.map((ki, i) => ki * ki * ki * pk_nl[i] / (2 * Math.PI * Math.PI)),
     f,
     sigma8_z,
   };
