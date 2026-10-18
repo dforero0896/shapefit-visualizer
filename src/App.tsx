@@ -294,10 +294,10 @@ export default function App() {
 
               <Slider label="q_∥" value={shapefit.qpar} min={0.8} max={1.2} step={0.005}
                 onChange={(v) => updateShapefit('qpar', v)}
-                latex="q<sub>∥</sub>" description="AP parallel scaling (line-of-sight)" />
+                latex="q<sub>∥</sub>" description="Alcock-Paczynski parallel scaling. Rescales k_∥ to account for distance errors along the line-of-sight." />
               <Slider label="q_⊥" value={shapefit.qper} min={0.8} max={1.2} step={0.005}
                 onChange={(v) => updateShapefit('qper', v)}
-                latex="q<sub>⊥</sub>" description="AP perpendicular scaling (transverse)" />
+                latex="q<sub>⊥</sub>" description="Alcock-Paczynski perpendicular scaling. Rescales k_⊥ to account for distance errors in the transverse direction." />
               <Slider label="k_p" value={shapefit.kp} min={0.01} max={0.1} step={0.001}
                 onChange={(v) => updateShapefit('kp', v)}
                 latex="k<sub>p</sub> [h/Mpc]" description="Pivot wavenumber" />
@@ -305,10 +305,11 @@ export default function App() {
               <div className="mt-4 p-3 bg-gray-800 rounded-lg border border-gray-600">
                 <h4 className="text-xs font-semibold text-gray-400 mb-2">ShapeFit Template Formula</h4>
                 <div className="text-xs text-gray-300 font-mono leading-relaxed bg-gray-900 p-2 rounded">
-                  <div>P<sup>now</sup>(k) → δA · P<sup>now</sup>(k·e<sup>−δε</sup>) · T(k)</div>
-                  <div className="mt-1">T(k) = exp[δm/a · tanh(a·ln(k/k<sub>p</sub>))</div>
-                  <div className="ml-4">+ δn·ln(k/k<sub>p</sub>)</div>
-                  <div className="ml-4">+ δc/(2a²) · tanh²(a·ln(k/k<sub>p</sub>))]</div>
+                  <div>P<sup>now</sup>(k) → δA · P<sup>now</sup>(k·q<sub>ap</sub>·e<sup>−δε</sup>) · T(k)</div>
+                  <div className="mt-1">q<sub>ap</sub> = (q<sub>∥</sub> · q<sub>⊥</sub><sup>2</sup>)<sup>1/3</sup></div>
+                  <div className="mt-1">T(k) = exp[δm/a · tanh(a·ln(k·q<sub>ap</sub>/k<sub>p</sub>))</div>
+                  <div className="ml-4">+ δn·ln(k·q<sub>ap</sub>/k<sub>p</sub>)</div>
+                  <div className="ml-4">+ δc/(2a²) · tanh²(a·ln(k·q<sub>ap</sub>/k<sub>p</sub>))]</div>
                   <div className="mt-1">P(k) = P<sup>now</sup>(k) · [W(k)]<sup>1+δγ</sup></div>
                 </div>
                 <p className="text-xs text-gray-500 mt-1">

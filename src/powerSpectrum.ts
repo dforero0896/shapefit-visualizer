@@ -246,11 +246,20 @@ function applyShapeFit(
   pknow_fid: number[],
   sf: ShapeFitParams
 ): { pk: number[]; pknow: number[] } {
-  const { dm, dn, dc, deps, dgam, dA, kp, a } = sf;
+  const { dm, dn, dc, deps, dgam, dA, kp, a, qpar, qper } = sf;
+  
+  // Alcock-Paczynski effect: rescale k
+  // For the monopole, the effective AP scaling is approximately:
+  // q_ap = (qpar * qper^2)^(1/3) for isotropic dilation
+  // More precisely, we need to account for the anisotropic rescaling
+  const q_ap = Math.pow(qpar * qper * qper, 1/3);
   
   // Compute modified no-wiggle spectrum
   const pknow = k.map((ki, i) => {
-    const logRatio = Math.log(ki / kp);
+    // Apply AP rescaling to k
+    const k_ap = ki * q_ap;
+    
+    const logRatio = Math.log(k_ap / kp);
     const tanhVal = Math.tanh(a * logRatio);
     
     // Tilt factor
@@ -261,7 +270,7 @@ function applyShapeFit(
     );
     
     // Broadband dilation: evaluate pknow_fid at k*exp(-deps)
-    const k_shifted = ki * Math.exp(-deps);
+    const k_shifted = k_ap * Math.exp(-deps);
     const pknow_shifted = interpLog(k, pknow_fid, k_shifted);
     const broadbandRatio = pknow_shifted / pknow_fid[i];
     
