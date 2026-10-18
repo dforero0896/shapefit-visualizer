@@ -248,27 +248,23 @@ function applyShapeFit(
 ): { pk: number[]; pknow: number[] } {
   const { dm, dn, dc, deps, dgam, dA, kp, a, qpar, qper } = sf;
   
-  // Alcock-Paczynski effect: rescale k
-  // For the monopole, the effective AP scaling is approximately:
-  // q_ap = (qpar * qper^2)^(1/3) for isotropic dilation
+  // For the no-wiggle spectrum, use the isotropic AP scaling
+  // q_ap = (qpar * qper^2)^(1/3) for the monopole
   const q_ap = Math.pow(qpar * qper * qper, 1/3);
   
   // Compute modified no-wiggle spectrum
   const pknow = k.map((ki, i) => {
-    // Apply AP rescaling to k
     const k_ap = ki * q_ap;
     
     const logRatio = Math.log(k_ap / kp);
     const tanhVal = Math.tanh(a * logRatio);
     
-    // Tilt factor
     const tilt = Math.exp(
       (dm / a) * tanhVal +
       dn * logRatio +
       (dc / (2 * a * a)) * tanhVal * tanhVal
     );
     
-    // Broadband dilation: evaluate pknow_fid at k*exp(-deps)
     const k_shifted = k_ap * Math.exp(-deps);
     const pknow_shifted = interpLog(k, pknow_fid, k_shifted);
     const broadbandRatio = pknow_shifted / pknow_fid[i];
@@ -276,20 +272,43 @@ function applyShapeFit(
     return pknow_fid[i] * dA * tilt * broadbandRatio;
   });
   
-  // Apply wiggle factor - the wiggles should also be rescaled by q_ap
+  // For the full power spectrum with wiggles, we need to properly account
+  // for the anisotropic AP effect by integrating over μ
+  // P(k) = (1/2) ∫_{-1}^{1} P(k, μ) dμ
+  // where P(k, μ) is evaluated at the AP-rescaled k'
+  
+  const n_mu = 20; // Number of μ integration points
+  const mu_grid = Array.from({length: n_mu}, (_, i) => (i + 0.5) / n_mu); // μ from 0 to 1
+  const mu_weights = Array(n_mu).fill(1.0 / n_mu); // Simple uniform weights
+  
   const pk = k.map((ki, i) => {
-    // The wiggle factor W(k) = P_fid(k) / P_now_fid(k) should be evaluated
-    // at the AP-rescaled k to shift the BAO peaks
-    const k_ap = ki * q_ap;
+    let pk_integral = 0;
     
-    // Interpolate the fiducial spectra at the rescaled k
-    const pk_fid_ap = interpLog(k, pk_fid, k_ap);
-    const pknow_fid_ap = interpLog(k, pknow_fid, k_ap);
+    // Integrate over μ
+    for (let imu = 0; imu < n_mu; imu++) {
+      const mu = mu_grid[imu];
+      const w_mu = mu_weights[imu];
+      
+      // AP rescaling for this μ
+      // k' = k * sqrt((μ/q_∥)² + ((1-μ²)/q_⊥²))
+      const k_ap_mu = ki * Math.sqrt(
+        (mu * mu) / (qpar * qpar) + 
+        (1 - mu * mu) / (qper * qper)
+      );
+      
+      // Interpolate fiducial spectra at the anisotropically rescaled k
+      const pk_fid_mu = interpLog(k, pk_fid, k_ap_mu);
+      const pknow_fid_mu = interpLog(k, pknow_fid, k_ap_mu);
+      
+      // Wiggle factor at this μ
+      const logWiggle_mu = Math.log(pk_fid_mu / pknow_fid_mu);
+      
+      // Contribution to the integral
+      // Note: pknow[i] is already computed with isotropic scaling
+      pk_integral += w_mu * pknow[i] * Math.exp((1 + dgam) * logWiggle_mu);
+    }
     
-    // Compute wiggle factor at rescaled k
-    const logWiggle = Math.log(pk_fid_ap / pknow_fid_ap);
-    
-    return pknow[i] * Math.exp((1 + dgam) * logWiggle);
+    return pk_integral;
   });
   
   return { pk, pknow };
