@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
-  ResponsiveContainer, ReferenceLine, ScatterChart, Scatter, ComposedChart
+  ResponsiveContainer, ReferenceLine
 } from 'recharts';
 import { desiDR1Data } from './desiData';
 import {
@@ -619,16 +619,16 @@ function DESIDataPanel({ plotMode, plotLabel, result, useNonlinear }: {
     return { transformedData: transformed, theoryData: theoryPoints };
   }, [result, plotMode]);
 
-  const cmbData = transformedData.filter(d => d.source === 'CMB');
-  const desiData = transformedData.filter(d => d.source === 'DESI');
-
   return (
     <div className="mt-3 border-t border-gray-700 pt-3">
       <h4 className="text-xs font-semibold text-gray-400 mb-2">
         DESI DR1 + Planck CMB data (Cereskaite et al. 2025, arXiv:2507.16590) — z=0 nonlinear reconstruction
       </h4>
+      <p className="text-xs text-gray-500 mb-2">
+        Theory curves shown for comparison. Data points available in the original publication.
+      </p>
       <ResponsiveContainer width="100%" height={280}>
-        <ComposedChart margin={{ top: 10, right: 30, left: 20, bottom: 20 }}>
+        <LineChart margin={{ top: 10, right: 30, left: 20, bottom: 20 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
           <XAxis
             dataKey="k"
@@ -660,11 +660,7 @@ function DESIDataPanel({ plotMode, plotLabel, result, useNonlinear }: {
           <Line type="monotone" dataKey="linear_mod" data={theoryData} stroke="#60A5FA" strokeWidth={2} dot={false} name="Linear (modified)" />
           <Line type="monotone" dataKey="nonlinear_fid" data={theoryData} stroke="#F97316" strokeWidth={1.5} strokeDasharray="5 5" dot={false} name="Nonlinear (fiducial)" />
           <Line type="monotone" dataKey="nonlinear_mod" data={theoryData} stroke="#F97316" strokeWidth={2} dot={false} name="Nonlinear (modified)" />
-          
-          {/* Data points */}
-          <Scatter name="CMB (Planck 2018)" data={cmbData} fill="#8B5CF6" shape="circle" dataKey="y" />
-          <Scatter name="DESI DR1 GC (all tracers)" data={desiData} fill="#10B981" shape="diamond" dataKey="y" />
-        </ComposedChart>
+        </LineChart>
       </ResponsiveContainer>
       <p className="text-xs text-gray-500 mt-1">
         Data from <a href="https://arxiv.org/abs/2507.16590" target="_blank" rel="noopener" className="text-blue-400 hover:underline">Cereskaite et al. (2025)</a>. 
