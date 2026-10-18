@@ -251,7 +251,6 @@ function applyShapeFit(
   // Alcock-Paczynski effect: rescale k
   // For the monopole, the effective AP scaling is approximately:
   // q_ap = (qpar * qper^2)^(1/3) for isotropic dilation
-  // More precisely, we need to account for the anisotropic rescaling
   const q_ap = Math.pow(qpar * qper * qper, 1/3);
   
   // Compute modified no-wiggle spectrum
@@ -277,9 +276,19 @@ function applyShapeFit(
     return pknow_fid[i] * dA * tilt * broadbandRatio;
   });
   
-  // Apply wiggle factor
+  // Apply wiggle factor - the wiggles should also be rescaled by q_ap
   const pk = k.map((ki, i) => {
-    const logWiggle = Math.log(pk_fid[i] / pknow_fid[i]);
+    // The wiggle factor W(k) = P_fid(k) / P_now_fid(k) should be evaluated
+    // at the AP-rescaled k to shift the BAO peaks
+    const k_ap = ki * q_ap;
+    
+    // Interpolate the fiducial spectra at the rescaled k
+    const pk_fid_ap = interpLog(k, pk_fid, k_ap);
+    const pknow_fid_ap = interpLog(k, pknow_fid, k_ap);
+    
+    // Compute wiggle factor at rescaled k
+    const logWiggle = Math.log(pk_fid_ap / pknow_fid_ap);
+    
     return pknow[i] * Math.exp((1 + dgam) * logWiggle);
   });
   
