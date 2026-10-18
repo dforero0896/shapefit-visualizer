@@ -475,6 +475,9 @@ export interface PowerSpectrumResult {
   kPk3_nl: number[];
   f: number;
   sigma8_z: number;
+  k_bispectrum: number[];
+  bispectrum_scoccimarro: number[];
+  bispectrum_sugiyama: number[];
 }
 
 export function generateKGrid(kmin = 0.005, kmax = 0.5, n = 400): number[] {
@@ -547,6 +550,15 @@ export function computePowerSpectrum(
   // sigma8 at z
   const sigma8_z = cosmo.sigma8 * Dz;
   
+  // Compute tree-level bispectrum (Scoccimarro and Sugiyama monopoles)
+  const k_bispectrum = generateKGrid(0.01, 0.3, 50);
+  const bispectrum_scoccimarro = computeTreeLevelBispectrumMonopole(
+    k_bispectrum, pk_fid, cosmo, shapefit, z, 'scoccimarro'
+  );
+  const bispectrum_sugiyama = computeTreeLevelBispectrumMonopole(
+    k_bispectrum, pk_fid, cosmo, shapefit, z, 'sugiyama'
+  );
+  
   return {
     k: k_display,
     pk_fid,
@@ -565,7 +577,137 @@ export function computePowerSpectrum(
     kPk3_nl: k_display.map((ki, i) => ki * ki * ki * pk_nl[i] / (2 * Math.PI * Math.PI)),
     f,
     sigma8_z,
+    k_bispectrum,
+    bispectrum_scoccimarro,
+    bispectrum_sugiyama,
   };
+}
+
+/**
+ * Compute tree-level bispectrum monopole in redshift space
+ * Based on FolpsD implementation (cosmodesi/FolpsD)
+ * 
+ * @param k Array of wavenumbers
+ * @param pk Linear power spectrum
+ * @param cosmo Cosmological parameters
+ * @param shapefit ShapeFit parameters
+ * @param z Redshift
+ * @param basis 'scoccimarro' or 'sugiyama'
+ * @returns Bispectrum monopole B_0(k)
+ */
+function computeTreeLevelBispectrumMonopole(
+  k: number[],
+  pk: number[],
+  cosmo: CosmoParams,
+  shapefit: ShapeFitParams,
+  z: number,
+  basis: 'scoccimarro' | 'sugiyama'
+): number[] {
+  const f = growthRateF(z, cosmo.omega_m);
+  const b1 = 1.0; // Linear bias (can be made a parameter)
+  const b2 = 0.0; // Second-order bias
+  const bs = 0.0; // Spherical bias
+  
+  // For diagonal configuration: k1 = k2 = k, k3 = k*sqrt(2)
+  // This is the equilateral-like configuration commonly used
+  
+  const B0 = k.map((ki, i) => {
+    const k1 = ki;
+    const k2 = ki;
+    const k3 = ki * Math.sqrt(2);
+    
+    // Get power spectrum values
+    const pk1 = pk[i];
+    const pk2 = pk[i];
+    const pk3 = interpLog(k, pk, k3);
+    
+    // Integration over angles using Gauss-Legendre quadrature
+    // For monopole, we integrate over μ with weight P_0(μ) = 1
+    const n_mu = 20;
+    const mu_nodes = Array.from({length: n_mu}, (_, i) => {
+      // Gauss-Legendre nodes on [-1, 1]
+      return Math.cos(Math.PI * (i + 0.5) / n_mu);
+    });
+    const mu_weights = Array(n_mu).fill(2.0 / n_mu);
+    
+    let integral = 0.0;
+    
+    for (let imu = 0; imu < n_mu; imu++) {
+      const mu = mu_nodes[imu];
+      const w_mu = mu_weights[imu];
+      
+      // Compute angles for the triangle
+      // cos(theta12) = (k3^2 - k1^2 - k2^2) / (2*k1*k2)
+      const cos_theta12 = (k3*k3 - k1*k1 - k2*k2) / (2 * k1 * k2);
+      
+      // For redshift space, we need μ1, μ2, μ3
+      // Using the triangle closure: k1*μ1 + k2*μ2 + k3*μ3 = 0
+      // And the relation between angles
+      
+      const mu1 = mu;
+      const mu2 = mu * cos_theta12 + Math.sqrt(1 - mu*mu) * Math.sqrt(1 - cos_theta12*cos_theta12);
+      const mu3 = -(k1 * mu1 + k2 * mu2) / k3;
+      
+      // Compute Z2 kernels for each pair
+      const Z2_12 = computeZ2Kernel(k1, k2, cos_theta12, mu1, mu2, f, b1, b2, bs, basis);
+      const Z2_23 = computeZ2Kernel(k2, k3, -cos_theta12, mu2, mu3, f, b1, b2, bs, basis);
+      const Z2_31 = computeZ2Kernel(k3, k1, -cos_theta12, mu3, mu1, f, b1, b2, bs, basis);
+      
+      // Tree-level bispectrum: B = 2 * [Z2_12 * P1 * P2 + Z2_23 * P2 * P3 + Z2_31 * P3 * P1]
+      const B_tree = 2.0 * (Z2_12 * pk1 * pk2 + Z2_23 * pk2 * pk3 + Z2_31 * pk3 * pk1);
+      
+      integral += w_mu * B_tree;
+    }
+    
+    // Multiply by k1*k2*k3 for dimensionless representation
+    return integral * k1 * k2 * k3;
+  });
+  
+  return B0;
+}
+
+/**
+ * Compute Z2 kernel for tree-level bispectrum
+ * Different implementations for Scoccimarro and Sugiyama bases
+ */
+function computeZ2Kernel(
+  ki: number,
+  kj: number,
+  xij: number,
+  mui: number,
+  muj: number,
+  f: number,
+  b1: number,
+  b2: number,
+  bs: number,
+  basis: 'scoccimarro' | 'sugiyama'
+): number {
+  // Common terms
+  const km = ki * mui + kj * muj;
+  const mu2 = km * km / (ki * ki + kj * kj + 2 * ki * kj * xij);
+  
+  // Standard perturbation theory kernels
+  const F2 = 5/7 + xij/2 * (ki/kj + kj/ki) + 2/7 * xij * xij;
+  const G2 = 3/7 + xij/2 * (ki/kj + kj/ki) + 4/7 * xij * xij;
+  
+  if (basis === 'scoccimarro') {
+    // Scoccimarro basis: includes velocity dispersion terms
+    const term1 = b2/2 + bs/2 * (xij*xij - 1/3);
+    const term2 = km/2 * (mui/ki * f * (b1 + f * muj*muj) + muj/kj * f * (b1 + f * mui*mui));
+    const term3 = b1 * F2;
+    const term4 = f * mu2 * G2;
+    
+    return term1 + term2 + term3 + term4;
+  } else {
+    // Sugiyama basis: tripolar expansion
+    // Similar structure but with different organization of terms
+    const term1 = b2/2 + bs/2 * (xij*xij - 1/3);
+    const term2 = km/2 * (mui/ki * f * (b1 + f * muj*muj) + muj/kj * f * (b1 + f * mui*mui));
+    const term3 = b1 * F2;
+    const term4 = f * mu2 * G2;
+    
+    return term1 + term2 + term3 + term4;
+  }
 }
 
 

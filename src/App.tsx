@@ -107,7 +107,8 @@ export default function App() {
   // Prepare chart data — focus on k = 0.02 to 0.5
   const chartData = useMemo(() => {
     const { k, pk_fid, pknow_fid, pk, pknow, pk_nl_fid, pk_nl, 
-            kPk_fid, kPk, kPk_nl_fid, kPk_nl, kPk3_fid, kPk3, kPk3_nl_fid, kPk3_nl } = result;
+            kPk_fid, kPk, kPk_nl_fid, kPk_nl, kPk3_fid, kPk3, kPk3_nl_fid, kPk3_nl,
+            k_bispectrum, bispectrum_scoccimarro, bispectrum_sugiyama } = result;
     
     return k.map((ki, i) => {
       let y_fid: number, y_mod: number;
@@ -158,6 +159,16 @@ export default function App() {
       ratio: d.ratio,
     }));
   }, [chartData]);
+
+  // Prepare bispectrum data
+  const bispectrumData = useMemo(() => {
+    const { k_bispectrum, bispectrum_scoccimarro, bispectrum_sugiyama } = result;
+    return k_bispectrum.map((ki, i) => ({
+      k: ki,
+      scoccimarro: bispectrum_scoccimarro[i],
+      sugiyama: bispectrum_sugiyama[i],
+    }));
+  }, [result]);
 
   const plotLabel = (useNonlinear ? 'Nonlinear ' : 'Linear ') + 
                     (plotMode === 'pk' ? 'P(k) [(Mpc/h)³]' :
@@ -469,6 +480,50 @@ export default function App() {
             </ResponsiveContainer>
           </div>
 
+          {/* Tree-Level Bispectrum Plot */}
+          <div className="bg-gray-800 rounded-xl border border-gray-700 p-4 mb-4 shadow-xl">
+            <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-green-500"></span>
+              Tree-Level Bispectrum Monopole B₀(k)
+            </h3>
+            <p className="text-xs text-gray-400 mb-2">
+              Diagonal configuration (k₁ = k₂ = k, k₃ = k√2) in redshift space
+            </p>
+            <ResponsiveContainer width="100%" height={300}>
+              <LineChart data={bispectrumData} margin={{ top: 10, right: 30, left: 20, bottom: 20 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+                <XAxis
+                  dataKey="k"
+                  scale="linear"
+                  domain={[0.01, 0.3]}
+                  ticks={[0.05, 0.1, 0.15, 0.2, 0.25, 0.3]}
+                  tickFormatter={(v) => v.toFixed(2)}
+                  stroke="#6B7280"
+                  label={{ value: 'k [h/Mpc]', position: 'bottom', offset: 0, style: { fill: '#9CA3AF', fontSize: 12 } }}
+                />
+                <YAxis
+                  scale="linear"
+                  domain={['auto', 'auto']}
+                  stroke="#6B7280"
+                  tickFormatter={(v) => v.toExponential(1)}
+                  label={{ value: 'k₁k₂k₃·B₀ [(Mpc/h)⁹]', angle: -90, position: 'insideLeft', offset: -5, style: { fill: '#9CA3AF', fontSize: 11 } }}
+                />
+                <Tooltip
+                  contentStyle={{ backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '8px', fontSize: 12 }}
+                  labelFormatter={(v) => `k = ${(v as number).toFixed(3)} h/Mpc`}
+                  formatter={(value: number, name: string) => [value.toExponential(3), name]}
+                />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Line type="monotone" dataKey="scoccimarro" name="Scoccimarro B₀" stroke="#10B981" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="sugiyama" name="Sugiyama B₀" stroke="#8B5CF6" strokeWidth={2} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+            <p className="text-xs text-gray-500 mt-2">
+              Tree-level bispectrum monopole computed using second-order perturbation theory in redshift space. 
+              Both Scoccimarro and Sugiyama bases shown for comparison.
+            </p>
+          </div>
+
           {/* Comparison Plots */}
           <div className="bg-gray-800 rounded-xl border border-gray-700 p-4 shadow-xl">
             <h3 className="text-sm font-semibold text-gray-300 mb-2">
@@ -494,6 +549,7 @@ export default function App() {
                 <li><b>Linear:</b> Eisenstein & Hu (1998) zero-baryon transfer function + Syren (Bartlett et al. 2023) correction for BAO wiggles</li>
                 <li><b>Nonlinear:</b> SYREN-HALOFIT (Bartlett et al. 2024) — symbolic regression-enhanced halofit model</li>
                 <li><b>ShapeFit template</b> from desilike/shapefit-prime to parameterize spectral modifications</li>
+                <li><b>Tree-level bispectrum:</b> Second-order perturbation theory in redshift space, with both Scoccimarro and Sugiyama monopole bases (based on cosmodesi/FolpsD)</li>
               </ul>
               <p>
                 The ShapeFit approach separates P(k) into a smooth no-wiggle component and a wiggle factor W(k) = P_fid/P_now,fid,
@@ -507,7 +563,7 @@ export default function App() {
               <p className="text-gray-500">
                 References: Eisenstein & Hu (1998) ApJ 511, 5 | Bartlett et al. (2023) arXiv:2311.15865 | 
                 Bartlett et al. (2024) arXiv:2402.17492 | Brieden et al. (2021) arXiv:2106.07641 | 
-                Cereskaite et al. (2025) arXiv:2507.16590
+                Cereskaite et al. (2025) arXiv:2507.16590 | Noriega et al. (2026) arXiv:2604.08895 (FolpsD)
               </p>
             </div>
           </div>
