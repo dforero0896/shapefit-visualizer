@@ -517,16 +517,20 @@ export function computePowerSpectrum(
   const Dz = growthD(z, cosmo.omega_m);
   const Dz2 = Dz * Dz;
   
+  // Apply growth rate modification from df
+  // df modifies the amplitude of the power spectrum
+  const df2 = shapefit.df * shapefit.df;
+  
   const pk_fid_wide = pk_fid_z0.map(p => p * Dz2);
   const pknow_fid_wide = pknow_fid_z0_norm.map(p => p * Dz2);
-  const pk_wide = pk_z0.map(p => p * Dz2);
-  const pknow_wide = pknow_z0.map(p => p * Dz2);
+  const pk_wide = pk_z0.map(p => p * Dz2 * df2);
+  const pknow_wide = pknow_z0.map(p => p * Dz2 * df2);
   
   // Compute nonlinear spectra on wide grid
   const pk_nl_fid_z0 = computeNonlinearPk(k_wide, cosmo, 0.0);
   const { pk: pk_nl_z0 } = applyShapeFit(k_wide, pk_nl_fid_z0, pknow_fid_z0_norm, shapefit);
   const pk_nl_fid_wide = pk_nl_fid_z0.map(p => p * Dz2);
-  const pk_nl_wide = pk_nl_z0.map(p => p * Dz2);
+  const pk_nl_wide = pk_nl_z0.map(p => p * Dz2 * df2);
   
   // Interpolate to display range
   const pk_fid = k_display.map(ki => interpLog(k_wide, pk_fid_wide, ki));
