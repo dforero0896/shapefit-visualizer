@@ -3,7 +3,6 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, ReferenceLine
 } from 'recharts';
-import { desiDR1Data } from './desiData';
 import {
   computePowerSpectrum,
   DEFAULT_COSMO,
@@ -89,7 +88,6 @@ export default function App() {
   const [redshift, setRedshift] = useState(0.5);
   const [activeTab, setActiveTab] = useState('cosmo');
   const [plotMode, setPlotMode] = useState<'pk' | 'kpk' | 'dkpk'>('dkpk');
-  const [showDESI, setShowDESI] = useState(true);
   const [useNonlinear, setUseNonlinear] = useState(false);
 
   const result = useMemo(() => {
@@ -174,7 +172,7 @@ export default function App() {
             Linear Power Spectrum Explorer
           </h1>
           <p className="text-xs sm:text-sm text-gray-400 mt-0.5">
-            Linear (EH98 + Syren) & Nonlinear (SYREN-HALOFIT) | ShapeFit template from{' '}
+            Linear (EH98 + Syren) & Nonlinear (SYREN-HALOFIT) power spectrum with ShapeFit template from{' '}
             <a href="https://github.com/dforero0896/desilike/tree/shapefit-prime" target="_blank" rel="noopener" className="text-blue-400 hover:underline">
               desilike/shapefit-prime
             </a>
@@ -383,15 +381,6 @@ export default function App() {
                 Linear Matter Power Spectrum — {plotLabel}
                 {plotMode === 'kpk' && <span className="text-xs text-gray-500">(linear scales)</span>}
               </h3>
-              <label className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={showDESI}
-                  onChange={(e) => setShowDESI(e.target.checked)}
-                  className="rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-blue-500"
-                />
-                <span>Show DESI DR1 data (Cereskaite et al. 2025)</span>
-              </label>
             </div>
             <ResponsiveContainer width="100%" height={400}>
               <LineChart data={chartData} margin={{ top: 10, right: 30, left: 20, bottom: 20 }}>
@@ -426,11 +415,6 @@ export default function App() {
                 <Line type="monotone" dataKey="noWiggleMod" name="P_now(k) [modified]" stroke="#F87171" strokeWidth={1.5} strokeDasharray="6 3" dot={false} />
               </LineChart>
             </ResponsiveContainer>
-            
-            {/* DESI Data Points Overlay */}
-            {showDESI && (
-              <DESIDataPanel plotMode={plotMode} plotLabel={plotLabel} result={result} useNonlinear={useNonlinear} />
-            )}
           </div>
 
           {/* Ratio Plot */}
@@ -506,8 +490,7 @@ export default function App() {
               </p>
               <p className="text-gray-500">
                 References: Eisenstein & Hu (1998) ApJ 511, 5 | Bartlett et al. (2023) arXiv:2311.15865 | 
-                Bartlett et al. (2024) arXiv:2402.17492 | Brieden et al. (2021) arXiv:2106.07641 | 
-                Cereskaite et al. (2025) arXiv:2507.16590
+                Bartlett et al. (2024) arXiv:2402.17492 | Brieden et al. (2021) arXiv:2106.07641
               </p>
             </div>
           </div>
@@ -556,122 +539,6 @@ function CosmoEffectPlot({ cosmo, plotMode }: { cosmo: CosmoParams; plotMode: st
         </LineChart>
       </ResponsiveContainer>
       <p className="text-xs text-gray-500 mt-1">Ratio vs Planck 2018 fiducial (Ω_m=0.31, h=0.68, n_s=0.97)</p>
-    </div>
-  );
-}
-
-// ─── DESI Data Panel ────────────────────────────────────────────────────────
-
-function DESIDataPanel({ plotMode, plotLabel, result, useNonlinear }: { 
-  plotMode: string; 
-  plotLabel: string; 
-  result: PowerSpectrumResult;
-  useNonlinear: boolean;
-}) {
-  // Prepare all data using useMemo to avoid recalculation
-  const { transformedData, theoryData } = useMemo(() => {
-    // Transform DESI data to match the current plot mode
-    const transformed = desiDR1Data.map(d => {
-      let y: number, yErr: number;
-      if (plotMode === 'pk') {
-        y = d.pk;
-        yErr = d.err;
-      } else if (plotMode === 'kpk') {
-        y = d.k * d.pk;
-        yErr = d.k * d.err;
-      } else {
-        // dkpk = k^3 * P(k) / (2π²)
-        const factor = d.k * d.k * d.k / (2 * Math.PI * Math.PI);
-        y = factor * d.pk;
-        yErr = factor * d.err;
-      }
-      return { ...d, y, yErr };
-    });
-
-    // Prepare theory curves at z=0 (to match DESI data)
-    const { k, pk_nl_fid, pk_nl, pk_fid } = result;
-    
-    const theoryPoints: { k: number; linear_fid: number; linear_mod: number; nonlinear_fid: number; nonlinear_mod: number }[] = [];
-    
-    for (let i = 0; i < k.length; i++) {
-      const ki = k[i];
-      if (ki < 0.0002 || ki > 0.2) continue;
-      
-      let linear_fid: number, linear_mod: number, nonlinear_fid: number, nonlinear_mod: number;
-      
-      if (plotMode === 'pk') {
-        linear_fid = pk_fid[i];
-        linear_mod = result.pk[i];
-        nonlinear_fid = pk_nl_fid[i];
-        nonlinear_mod = pk_nl[i];
-      } else if (plotMode === 'kpk') {
-        linear_fid = ki * pk_fid[i];
-        linear_mod = ki * result.pk[i];
-        nonlinear_fid = ki * pk_nl_fid[i];
-        nonlinear_mod = ki * pk_nl[i];
-      } else {
-        // dkpk
-        const factor = ki * ki * ki / (2 * Math.PI * Math.PI);
-        linear_fid = factor * pk_fid[i];
-        linear_mod = factor * result.pk[i];
-        nonlinear_fid = factor * pk_nl_fid[i];
-        nonlinear_mod = factor * pk_nl[i];
-      }
-      
-      theoryPoints.push({ k: ki, linear_fid, linear_mod, nonlinear_fid, nonlinear_mod });
-    }
-    
-    return { transformedData: transformed, theoryData: theoryPoints };
-  }, [result, plotMode]);
-
-  return (
-    <div className="mt-3 border-t border-gray-700 pt-3">
-      <h4 className="text-xs font-semibold text-gray-400 mb-2">
-        DESI DR1 + Planck CMB data (Cereskaite et al. 2025, arXiv:2507.16590) — z=0 nonlinear reconstruction
-      </h4>
-      <p className="text-xs text-gray-500 mb-2">
-        Theory curves shown for comparison. Data points available in the original publication.
-      </p>
-      <ResponsiveContainer width="100%" height={280}>
-        <LineChart margin={{ top: 10, right: 30, left: 20, bottom: 20 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
-          <XAxis
-            dataKey="k"
-            type="number"
-            scale={plotMode === 'kpk' ? 'linear' : 'log'}
-            domain={plotMode === 'kpk' ? [0.01, 0.2] : [0.0002, 0.2]}
-            tickFormatter={(v: number) => v.toExponential(1)}
-            stroke="#6B7280"
-            label={{ value: 'k [h/Mpc]', position: 'bottom', offset: 0, style: { fill: '#9CA3AF', fontSize: 12 } }}
-          />
-          <YAxis
-            type="number"
-            scale={plotMode === 'kpk' ? 'linear' : 'log'}
-            domain={['auto', 'auto']}
-            tickFormatter={plotMode === 'kpk' ? (v: number) => v.toFixed(0) : (v: number) => v.toExponential(1)}
-            stroke="#6B7280"
-            label={{ value: plotLabel, angle: -90, position: 'insideLeft', offset: -5, style: { fill: '#9CA3AF', fontSize: 11 } }}
-          />
-          <Tooltip
-            contentStyle={{ backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '8px', fontSize: 11 }}
-            formatter={(value: any, name: any) => {
-              return [`${Number(value).toExponential(3)}`, name];
-            }}
-          />
-          <Legend wrapperStyle={{ fontSize: 11 }} />
-          
-          {/* Theory lines */}
-          <Line type="monotone" dataKey="linear_fid" data={theoryData} stroke="#60A5FA" strokeWidth={1.5} strokeDasharray="5 5" dot={false} name="Linear (fiducial)" />
-          <Line type="monotone" dataKey="linear_mod" data={theoryData} stroke="#60A5FA" strokeWidth={2} dot={false} name="Linear (modified)" />
-          <Line type="monotone" dataKey="nonlinear_fid" data={theoryData} stroke="#F97316" strokeWidth={1.5} strokeDasharray="5 5" dot={false} name="Nonlinear (fiducial)" />
-          <Line type="monotone" dataKey="nonlinear_mod" data={theoryData} stroke="#F97316" strokeWidth={2} dot={false} name="Nonlinear (modified)" />
-        </LineChart>
-      </ResponsiveContainer>
-      <p className="text-xs text-gray-500 mt-1">
-        Data from <a href="https://arxiv.org/abs/2507.16590" target="_blank" rel="noopener" className="text-blue-400 hover:underline">Cereskaite et al. (2025)</a>. 
-        Full data: <a href="https://zenodo.org/records/19788154" target="_blank" rel="noopener" className="text-blue-400 hover:underline">Zenodo</a>. 
-        Points shown are representative; error bars indicate 1σ uncertainties. Theory curves show both linear (blue) and nonlinear (orange) predictions.
-      </p>
     </div>
   );
 }

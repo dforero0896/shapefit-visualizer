@@ -568,4 +568,279 @@ export function computePowerSpectrum(
   };
 }
 
+/**
+ * Compute tree-level bispectrum using geofptax implementation
+ * Based on dforero0896/geofptax with B1=0 and all biases=0
+ * 
+ * @param k Array of wavenumbers (diagonal configuration k1=k2=k)
+ * @param pk Linear power spectrum (modified by ShapeFit)
+ * @param cosmo Cosmological parameters
+ * @param shapefit ShapeFit parameters
+ * @param z Redshift
+ * @param basis 'scoccimarro' or 'sugiyama'
+ * @returns Bispectrum monopole B_0(k) scaled by k²
+ */
+function computeTreeLevelBispectrumGeofpt(
+  k: number[],
+  pk: number[],
+  cosmo: CosmoParams,
+  shapefit: ShapeFitParams,
+  z: number,
+  basis: 'scoccimarro' | 'sugiyama'
+): number[] {
+  const f = growthRateF(z, cosmo.omega_m);
+  const b1 = 1.0; // Linear bias = 1 (matter)
+  const b2 = 0.0; // Second-order bias = 0
+  const bs = 0.0; // Tidal bias = 0
+  const alpha_par = shapefit.qpar; // AP parameter
+  const alpha_perp = shapefit.qper; // AP parameter
+  const sigma_fog = 5.0; // Finger-of-God damping scale
+  
+  // GEO-FPT coefficients (from geofptax/constants.py F_VALS_FULL)
+  const f1 = [1.00334041, -3.97587153e-03, 2.39676798e-02, -5.68098245e-02, 1.32544359e-02];
+  const f2 = [1.01798746, -4.10578402e-03, 1.48808466e-02, -5.46660187e-02, 1.11441504e-02];
+  const f3 = [1.03745852, 1.95019784e-03, 5.56349564e-03, -4.83637541e-02, 8.06689225e-03];
+  
+  // Interpolate GEO-FPT coefficients at the given redshift
+  const a = 1.0 / (1.0 + z);
+  const a_vals = [1.0/3.0, 1.0/2.0, 2.0/3.0]; // z=2, 1, 0.5
+  const af = interpolateGeoCoeffs(a, [f3, f2, f1], a_vals);
+  
+  // Compute bispectrum for each k
+  const B0 = k.map((ki, i) => {
+    const k1 = ki;
+    const k2 = ki; // Diagonal configuration
+    const k3 = ki * Math.sqrt(2); // For equilateral-like triangle
+    
+    // Get power spectrum values
+    const pk1 = pk[i];
+    const pk2 = pk[i];
+    const pk3 = interpLog(k, pk, k3);
+    
+    // Integration over angles using Gauss-Legendre quadrature
+    // Reduced to 10 points for stability and speed
+    const n_mu = 10;
+    const n_phi = 10;
+    const n_x = 10;
+    
+    // Get quadrature points and weights
+    const [mu_nodes, mu_weights] = gaussLegendre(n_mu);
+    const [phi_nodes, phi_weights] = gaussLegendre(n_phi, 0, 2 * Math.PI);
+    const [x_nodes, x_weights] = gaussLegendre(n_x);
+    
+    let integral = 0.0;
+    
+    // 3D integration over (x, mu, phi)
+    for (let ix = 0; ix < n_x; ix++) {
+      const x = x_nodes[ix]; // cos(angle between k1 and k2)
+      const wx = x_weights[ix];
+      
+      for (let imu = 0; imu < n_mu; imu++) {
+        const mu = mu_nodes[imu]; // cos(angle between k1 and LOS)
+        const wmu = mu_weights[imu];
+        
+        for (let iphi = 0; iphi < n_phi; iphi++) {
+          const phi = phi_nodes[iphi]; // azimuthal angle
+          const wphi = phi_weights[iphi];
+          
+          // Compute angles for the triangle
+          const mu2 = mu * x + Math.sqrt(1 - mu*mu) * Math.sqrt(1 - x*x) * Math.cos(phi);
+          const mu3 = -(k1 * mu + k2 * mu2) / k3;
+          
+          // Apply AP transformations
+          const Fsq = 1.0 / (alpha_par / alpha_perp) ** 2;
+          const k1_rs = k1 * Math.sqrt(1 + mu*mu * (Fsq - 1)) / alpha_perp;
+          const k2_rs = k2 * Math.sqrt(1 + mu2*mu2 * (Fsq - 1)) / alpha_perp;
+          const k3_rs = k3 * Math.sqrt(1 + mu3*mu3 * (Fsq - 1)) / alpha_perp;
+          
+          const mu1_rs = mu * alpha_perp / (alpha_par * Math.sqrt(1 + mu*mu * (Fsq - 1)));
+          const mu2_rs = mu2 * alpha_perp / (alpha_par * Math.sqrt(1 + mu2*mu2 * (Fsq - 1)));
+          const mu3_rs = mu3 * alpha_perp / (alpha_par * Math.sqrt(1 + mu3*mu3 * (Fsq - 1)));
+          
+          // Compute GEO-FPT factor
+          const geo_factor = computeGeoFactor(k1_rs, k2_rs, k3_rs, af, 1.0);
+          
+          // Compute FoG damping
+          const k_par_sq_sum = (k1_rs * mu1_rs)**2 + (k2_rs * mu2_rs)**2 + (k3_rs * mu3_rs)**2;
+          const D_fog = 1.0 / (1 + 0.5 * k_par_sq_sum**2 * (sigma_fog / 1.0)**4)**2;
+          
+          // Compute Z1 kernels
+          const z1_1 = b1 + f * mu1_rs**2;
+          const z1_2 = b1 + f * mu2_rs**2;
+          const z1_3 = b1 + f * mu3_rs**2;
+          
+          // Compute F2 and G2 kernels
+          const f2_12 = computeF2Kernel(k1_rs, k2_rs, k3_rs);
+          const f2_23 = computeF2Kernel(k2_rs, k3_rs, k1_rs);
+          const f2_13 = computeF2Kernel(k1_rs, k3_rs, k2_rs);
+          
+          const g2_12 = computeG2Kernel(k1_rs, k2_rs, k3_rs);
+          const g2_23 = computeG2Kernel(k2_rs, k3_rs, k1_rs);
+          const g2_13 = computeG2Kernel(k1_rs, k3_rs, k2_rs);
+          
+          // Compute Z2 kernels with GEO-FPT correction
+          const z2_12 = computeZ2Kernel(k1_rs, k2_rs, k3_rs, f2_12, g2_12, mu1_rs, mu2_rs, f, b1, b2, bs) * geo_factor;
+          const z2_23 = computeZ2Kernel(k2_rs, k3_rs, k1_rs, f2_23, g2_23, mu2_rs, mu3_rs, f, b1, b2, bs) * geo_factor;
+          const z2_13 = computeZ2Kernel(k1_rs, k3_rs, k2_rs, f2_13, g2_13, mu1_rs, mu3_rs, f, b1, b2, bs) * geo_factor;
+          
+          // Form tree-level bispectrum terms
+          const B12 = 2 * z1_1 * z1_2 * z2_12 * pk1 * pk2;
+          const B23 = 2 * z1_2 * z1_3 * z2_23 * pk2 * pk3;
+          const B31 = 2 * z1_1 * z1_3 * z2_13 * pk1 * pk3;
+          
+          const tree_level = B12 + B23 + B31;
+          
+          // Apply FoG damping and normalization
+          const result = D_fog * tree_level / (alpha_par**2 * alpha_perp**4);
+          
+          // Apply basis function for the multipole
+          let basis_func = 1.0;
+          if (basis === 'sugiyama') {
+            // Sugiyama B000 basis
+            basis_func = 1.0 / (8 * Math.PI);
+          }
+          
+          integral += wx * wmu * wphi * result * basis_func;
+        }
+      }
+    }
+    
+    // Return k² * B(k) for plotting (as in the examples)
+    return ki * ki * integral;
+  });
+  
+  return B0;
+}
+
+/**
+ * Interpolate GEO-FPT coefficients at a given scale factor
+ */
+function interpolateGeoCoeffs(a: number, f_vals: number[][], a_vals: number[]): number[] {
+  const result = new Array(5).fill(0);
+  for (let i = 0; i < 5; i++) {
+    const vals = f_vals.map(f => f[i]);
+    result[i] = linearInterp(a, a_vals, vals);
+  }
+  return result;
+}
+
+/**
+ * Linear interpolation
+ */
+function linearInterp(x: number, x_vals: number[], y_vals: number[]): number {
+  if (x <= x_vals[0]) return y_vals[0];
+  if (x >= x_vals[x_vals.length - 1]) return y_vals[y_vals.length - 1];
+  
+  for (let i = 0; i < x_vals.length - 1; i++) {
+    if (x >= x_vals[i] && x <= x_vals[i + 1]) {
+      const t = (x - x_vals[i]) / (x_vals[i + 1] - x_vals[i]);
+      return y_vals[i] + t * (y_vals[i + 1] - y_vals[i]);
+    }
+  }
+  return y_vals[y_vals.length - 1];
+}
+
+/**
+ * Compute GEO-FPT correction factor
+ */
+function computeGeoFactor(k1: number, k2: number, k3: number, af: number[], hh: number): number {
+  const kmax = Math.max(k1, k2, k3);
+  const kmin = Math.min(k1, k2, k3);
+  const kmed = k1 + k2 + k3 - kmax - kmin;
+  
+  const cosmax = (kmed**2 + kmin**2 - kmax**2) / (2 * kmed * kmin);
+  const cosmed = (kmax**2 + kmin**2 - kmed**2) / (2 * kmax * kmin);
+  const cosmin = (kmax**2 + kmed**2 - kmin**2) / (2 * kmax * kmed);
+  
+  // Compute area using Heron's formula
+  const perim = (k1 + k2 + k3) / 2;
+  const area = Math.sqrt(perim * (perim - k1) * (perim - k2) * (perim - k3)) / (hh**2 * 0.001);
+  
+  return af[0] + af[1] * cosmed / cosmin + af[2] * cosmax / cosmin + af[3] * area + af[4] * area**2;
+}
+
+/**
+ * Compute F2 kernel
+ */
+function computeF2Kernel(ka: number, kb: number, kc: number): number {
+  const cab = (kc**2 - ka**2 - kb**2) / (2 * ka * kb);
+  return 5/7 + 0.5 * cab * (ka/kb + kb/ka) + 2/7 * cab**2;
+}
+
+/**
+ * Compute G2 kernel
+ */
+function computeG2Kernel(ka: number, kb: number, kc: number): number {
+  const cab = (kc**2 - ka**2 - kb**2) / (2 * ka * kb);
+  return 3/7 + 0.5 * cab * (ka/kb + kb/ka) + 4/7 * cab**2;
+}
+
+/**
+ * Compute Z2 kernel
+ */
+function computeZ2Kernel(
+  ka: number, kb: number, kc: number,
+  f2: number, g2: number,
+  mua: number, mub: number,
+  f: number, b1: number, b2: number, bs: number
+): number {
+  const cab = (kc**2 - ka**2 - kb**2) / (2 * ka * kb);
+  const ksq = Math.sqrt(ka**2 + kb**2 + 2 * ka * kb * cab);
+  const mu12 = (ka * mua + kb * mub) / ksq;
+  
+  const s2 = cab**2 - 1/3;
+  
+  const b1_terms = b1 * (f2 + 0.5 * f * mu12 * ksq * (mua/ka + mub/kb));
+  const g_term = f * mu12**2 * g2;
+  const fsq_term = 0.5 * f**2 * mu12 * ksq * mua * mub * (mub/ka + mua/kb);
+  const b_terms = 0.5 * (b2 + bs * s2);
+  
+  return b1_terms + g_term + fsq_term + b_terms;
+}
+
+/**
+ * Gauss-Legendre quadrature points and weights
+ */
+function gaussLegendre(n: number, a: number = -1, b: number = 1): [number[], number[]] {
+  // Use precomputed values for common n
+  if (n === 20) {
+    const nodes = [
+      -0.9931285991850949, -0.9639719272779138, -0.9122344282513259,
+      -0.8391169718222188, -0.7463319064601508, -0.6360536807265150,
+      -0.5108670019508271, -0.3737060887154195, -0.2277858511416451,
+      -0.0765265211334973, 0.0765265211334973, 0.2277858511416451,
+      0.3737060887154195, 0.5108670019508271, 0.6360536807265150,
+      0.7463319064601508, 0.8391169718222188, 0.9122344282513259,
+      0.9639719272779138, 0.9931285991850949
+    ];
+    const weights = [
+      0.0176140071391521, 0.0406014298003869, 0.0626720483341091,
+      0.0832767415767048, 0.1019301198172404, 0.1181945319615184,
+      0.1316886384491766, 0.1420961093183867, 0.1491729864726037,
+      0.1527533871307258, 0.1527533871307258, 0.1491729864726037,
+      0.1420961093183867, 0.1316886384491766, 0.1181945319615184,
+      0.1019301198172404, 0.0832767415767048, 0.0626720483341091,
+      0.0406014298003869, 0.0176140071391521
+    ];
+    
+    // Scale from [-1, 1] to [a, b]
+    const scaled_nodes = nodes.map(x => 0.5 * (b - a) * x + 0.5 * (b + a));
+    const scaled_weights = weights.map(w => 0.5 * (b - a) * w);
+    
+    return [scaled_nodes, scaled_weights];
+  }
+  
+  // Fallback: simple approximation for other n
+  const nodes = [];
+  const weights = [];
+  for (let i = 0; i < n; i++) {
+    const x = Math.cos(Math.PI * (i + 0.5) / n);
+    nodes.push(0.5 * (b - a) * x + 0.5 * (b + a));
+    weights.push(0.5 * (b - a) * 2 / n);
+  }
+  return [nodes, weights];
+}
+
+
+
 
