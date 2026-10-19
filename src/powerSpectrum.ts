@@ -551,8 +551,8 @@ export function computePowerSpectrum(
   const sigma8_z = cosmo.sigma8 * Dz;
   
   // Compute tree-level bispectrum using geofptax implementation
-  // Based on dforero0896/geofptax with B1=0 and all biases=0
-  const k_bispectrum = generateKGrid(0.01, 0.3, 30); // Reduced points for stability
+  // Based on dforero0896/geofptax with b1=1 and b2=bs=0
+  const k_bispectrum = generateKGrid(0.01, 0.12, 20); // Limited to k=0.12 as requested
   let bispectrum_scoccimarro: number[];
   let bispectrum_sugiyama: number[];
   
@@ -623,7 +623,7 @@ function computeTreeLevelBispectrumGeofpt(
   basis: 'scoccimarro' | 'sugiyama'
 ): number[] {
   const f = growthRateF(z, cosmo.omega_m);
-  const b1 = 0.0; // Linear bias = 0 as requested
+  const b1 = 1.0; // Linear bias = 1 (matter)
   const b2 = 0.0; // Second-order bias = 0
   const bs = 0.0; // Tidal bias = 0
   const alpha_par = shapefit.qpar; // AP parameter

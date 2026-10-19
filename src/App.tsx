@@ -486,48 +486,92 @@ export default function App() {
             </ResponsiveContainer>
           </div>
 
-          {/* Tree-Level Bispectrum Plot */}
+          {/* Tree-Level Bispectrum Plots - Separate Panels */}
           {bispectrumData.length > 0 && (
-            <div className="bg-gray-800 rounded-xl border border-gray-700 p-4 mb-4 shadow-xl">
-              <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-green-500"></span>
-                Tree-Level Bispectrum (GEO-FPT)
-              </h3>
-              <p className="text-xs text-gray-400 mb-2">
-                Diagonal configuration (k₁ = k₂ = k) in redshift space with b₁=b₂=bₛ=0
-              </p>
-              <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={bispectrumData} margin={{ top: 10, right: 30, left: 20, bottom: 20 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
-                  <XAxis
-                    dataKey="k"
-                    scale="linear"
-                    domain={[0.01, 0.3]}
-                    ticks={[0.05, 0.1, 0.15, 0.2, 0.25, 0.3]}
-                    tickFormatter={(v) => v.toFixed(2)}
-                    stroke="#6B7280"
-                    label={{ value: 'k [h/Mpc]', position: 'bottom', offset: 0, style: { fill: '#9CA3AF', fontSize: 12 } }}
-                  />
-                  <YAxis
-                    scale="linear"
-                    domain={['auto', 'auto']}
-                    stroke="#6B7280"
-                    tickFormatter={(v) => v.toExponential(1)}
-                    label={{ value: 'k² B₀(k) [(Mpc/h)⁶]', angle: -90, position: 'insideLeft', offset: -5, style: { fill: '#9CA3AF', fontSize: 11 } }}
-                  />
-                  <Tooltip
-                    contentStyle={{ backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '8px', fontSize: 12 }}
-                    labelFormatter={(v) => `k = ${(v as number).toFixed(3)} h/Mpc`}
-                    formatter={(value: number, name: string) => [value.toExponential(3), name]}
-                  />
-                  <Legend wrapperStyle={{ fontSize: 12 }} />
-                  <Line type="monotone" dataKey="k2_scoccimarro" name="Scoccimarro k²B₀" stroke="#10B981" strokeWidth={2} dot={false} />
-                  <Line type="monotone" dataKey="k2_sugiyama" name="Sugiyama k²B₀" stroke="#8B5CF6" strokeWidth={2} dot={false} />
-                </LineChart>
-              </ResponsiveContainer>
-              <p className="text-xs text-gray-500 mt-2">
-                Tree-level bispectrum monopole computed using GEO-FPT implementation with modified linear power spectrum.
-                Both Scoccimarro and Sugiyama bases shown for comparison. Based on dforero0896/geofptax.
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              {/* Scoccimarro Panel */}
+              <div className="bg-gray-800 rounded-xl border border-gray-700 p-4 shadow-xl">
+                <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-green-500"></span>
+                  Scoccimarro Basis
+                </h3>
+                <p className="text-xs text-gray-400 mb-2">
+                  Diagonal configuration (k₁ = k₂ = k) with b₁=1, b₂=bₛ=0
+                </p>
+                <ResponsiveContainer width="100%" height={280}>
+                  <LineChart data={bispectrumData} margin={{ top: 10, right: 30, left: 20, bottom: 20 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+                    <XAxis
+                      dataKey="k"
+                      scale="linear"
+                      domain={[0.01, 0.12]}
+                      ticks={[0.02, 0.04, 0.06, 0.08, 0.10, 0.12]}
+                      tickFormatter={(v) => v.toFixed(2)}
+                      stroke="#6B7280"
+                      label={{ value: 'k [h/Mpc]', position: 'bottom', offset: 0, style: { fill: '#9CA3AF', fontSize: 12 } }}
+                    />
+                    <YAxis
+                      scale="linear"
+                      domain={['auto', 'auto']}
+                      stroke="#6B7280"
+                      tickFormatter={(v) => v.toExponential(1)}
+                      label={{ value: 'k² B₀(k) [(Mpc/h)⁶]', angle: -90, position: 'insideLeft', offset: -5, style: { fill: '#9CA3AF', fontSize: 11 } }}
+                    />
+                    <Tooltip
+                      contentStyle={{ backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '8px', fontSize: 12 }}
+                      labelFormatter={(v) => `k = ${(v as number).toFixed(3)} h/Mpc`}
+                      formatter={(value: number) => [value.toExponential(3), 'k²B₀']}
+                    />
+                    <Line type="monotone" dataKey="k2_scoccimarro" name="k²B₀" stroke="#10B981" strokeWidth={2} dot={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+
+              {/* Sugiyama Panel */}
+              <div className="bg-gray-800 rounded-xl border border-gray-700 p-4 shadow-xl">
+                <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-purple-500"></span>
+                  Sugiyama Basis
+                </h3>
+                <p className="text-xs text-gray-400 mb-2">
+                  Diagonal configuration (k₁ = k₂ = k) with b₁=1, b₂=bₛ=0
+                </p>
+                <ResponsiveContainer width="100%" height={280}>
+                  <LineChart data={bispectrumData} margin={{ top: 10, right: 30, left: 20, bottom: 20 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+                    <XAxis
+                      dataKey="k"
+                      scale="linear"
+                      domain={[0.01, 0.12]}
+                      ticks={[0.02, 0.04, 0.06, 0.08, 0.10, 0.12]}
+                      tickFormatter={(v) => v.toFixed(2)}
+                      stroke="#6B7280"
+                      label={{ value: 'k [h/Mpc]', position: 'bottom', offset: 0, style: { fill: '#9CA3AF', fontSize: 12 } }}
+                    />
+                    <YAxis
+                      scale="linear"
+                      domain={['auto', 'auto']}
+                      stroke="#6B7280"
+                      tickFormatter={(v) => v.toExponential(1)}
+                      label={{ value: 'k² B₀(k) [(Mpc/h)⁶]', angle: -90, position: 'insideLeft', offset: -5, style: { fill: '#9CA3AF', fontSize: 11 } }}
+                    />
+                    <Tooltip
+                      contentStyle={{ backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '8px', fontSize: 12 }}
+                      labelFormatter={(v) => `k = ${(v as number).toFixed(3)} h/Mpc`}
+                      formatter={(value: number) => [value.toExponential(3), 'k²B₀']}
+                    />
+                    <Line type="monotone" dataKey="k2_sugiyama" name="k²B₀" stroke="#8B5CF6" strokeWidth={2} dot={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
+          
+          {bispectrumData.length > 0 && (
+            <div className="bg-gray-800/50 rounded-lg border border-gray-700 p-3 mb-4">
+              <p className="text-xs text-gray-400">
+                <b>Note:</b> Tree-level bispectrum monopole computed using GEO-FPT implementation with modified linear power spectrum.
+                Based on dforero0896/geofptax with b₁=1 (linear bias), b₂=bₛ=0 (no higher-order biases).
               </p>
             </div>
           )}
@@ -557,7 +601,7 @@ export default function App() {
                 <li><b>Linear:</b> Eisenstein & Hu (1998) zero-baryon transfer function + Syren (Bartlett et al. 2023) correction for BAO wiggles</li>
                 <li><b>Nonlinear:</b> SYREN-HALOFIT (Bartlett et al. 2024) — symbolic regression-enhanced halofit model</li>
                 <li><b>ShapeFit template</b> from desilike/shapefit-prime to parameterize spectral modifications</li>
-                <li><b>Tree-level bispectrum:</b> GEO-FPT implementation (dforero0896/geofptax) with modified linear power spectrum, showing both Scoccimarro and Sugiyama bases with b₁=b₂=bₛ=0</li>
+                <li><b>Tree-level bispectrum:</b> GEO-FPT implementation (dforero0896/geofptax) with modified linear power spectrum, showing both Scoccimarro and Sugiyama bases with b₁=1, b₂=bₛ=0</li>
               </ul>
               <p>
                 The ShapeFit approach separates P(k) into a smooth no-wiggle component and a wiggle factor W(k) = P_fid/P_now,fid,
