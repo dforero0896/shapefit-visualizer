@@ -475,9 +475,6 @@ export interface PowerSpectrumResult {
   kPk3_nl: number[];
   f: number;
   sigma8_z: number;
-  k_bispectrum: number[];
-  bispectrum_scoccimarro: number[];
-  bispectrum_sugiyama: number[];
 }
 
 export function generateKGrid(kmin = 0.005, kmax = 0.5, n = 400): number[] {
@@ -550,34 +547,6 @@ export function computePowerSpectrum(
   // sigma8 at z
   const sigma8_z = cosmo.sigma8 * Dz;
   
-  // Compute tree-level bispectrum using geofptax implementation
-  // Based on dforero0896/geofptax with b1=1 and b2=bs=0
-  const k_bispectrum = generateKGrid(0.01, 0.12, 20); // Limited to k=0.12 as requested
-  let bispectrum_scoccimarro: number[];
-  let bispectrum_sugiyama: number[];
-  
-  try {
-    bispectrum_scoccimarro = computeTreeLevelBispectrumGeofpt(
-      k_bispectrum, pk_fid, cosmo, shapefit, z, 'scoccimarro'
-    );
-    bispectrum_sugiyama = computeTreeLevelBispectrumGeofpt(
-      k_bispectrum, pk_fid, cosmo, shapefit, z, 'sugiyama'
-    );
-    
-    // Validate results - replace any NaN/Infinity with 0
-    bispectrum_scoccimarro = bispectrum_scoccimarro.map(v => 
-      isFinite(v) ? v : 0
-    );
-    bispectrum_sugiyama = bispectrum_sugiyama.map(v => 
-      isFinite(v) ? v : 0
-    );
-  } catch (error) {
-    console.error('Bispectrum computation failed:', error);
-    // Return zero arrays if computation fails
-    bispectrum_scoccimarro = new Array(k_bispectrum.length).fill(0);
-    bispectrum_sugiyama = new Array(k_bispectrum.length).fill(0);
-  }
-  
   return {
     k: k_display,
     pk_fid,
@@ -596,9 +565,6 @@ export function computePowerSpectrum(
     kPk3_nl: k_display.map((ki, i) => ki * ki * ki * pk_nl[i] / (2 * Math.PI * Math.PI)),
     f,
     sigma8_z,
-    k_bispectrum,
-    bispectrum_scoccimarro,
-    bispectrum_sugiyama,
   };
 }
 
