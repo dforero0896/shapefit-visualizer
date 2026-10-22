@@ -80,6 +80,46 @@ function Tabs({ activeTab, onChange }: { activeTab: string; onChange: (id: strin
   );
 }
 
+// ─── Viridis-like colormap ──────────────────────────────────────────────────
+
+function viridisColor(t: number): string {
+  // Simplified viridis colormap (blue -> green -> yellow)
+  t = Math.max(0, Math.min(1, t));
+  const r = Math.round(255 * Math.max(0, Math.min(1, -0.35 + 2.5 * t * t)));
+  const g = Math.round(255 * Math.max(0, Math.min(1, 0.05 + 0.95 * t)));
+  const b = Math.round(255 * Math.max(0, Math.min(1, 0.55 + 0.45 * Math.cos(3.5 * t * Math.PI))));
+  return `rgb(${r},${g},${b})`;
+}
+
+// ─── Download helper ────────────────────────────────────────────────────────
+
+function downloadSVG(elementId: string, filename: string) {
+  const svgElement = document.querySelector(`#${elementId} svg`);
+  if (!svgElement) return;
+  
+  const clone = svgElement.cloneNode(true) as SVGElement;
+  clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  
+  // Add white background
+  const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  bg.setAttribute('width', '100%');
+  bg.setAttribute('height', '100%');
+  bg.setAttribute('fill', '#111827');
+  clone.insertBefore(bg, clone.firstChild);
+  
+  const svgData = new XMLSerializer().serializeToString(clone);
+  const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
 // ─── Main App ───────────────────────────────────────────────────────────────
 
 export default function App() {
@@ -87,8 +127,11 @@ export default function App() {
   const [shapefit, setShapefit] = useState<ShapeFitParams>({ ...DEFAULT_SHAPEFIT });
   const [redshift, setRedshift] = useState(0.5);
   const [activeTab, setActiveTab] = useState('cosmo');
-  const [plotMode, setPlotMode] = useState<'pk' | 'kpk' | 'dkpk'>('dkpk');
+  const [plotMode, setPlotMode] = useState<'pk' | 'kpk' | 'dkpk'>('kpk');
   const [useNonlinear, setUseNonlinear] = useState(false);
+  const [showSweep, setShowSweep] = useState(false);
+  const [sweepParam, setSweepParam] = useState('omega_m');
+  const [sweepType, setSweepType] = useState<'cosmo' | 'shapefit'>('cosmo');
 
   const result = useMemo(() => {
     return computePowerSpectrum(cosmo, shapefit, redshift);
@@ -156,6 +199,98 @@ export default function App() {
       ratio: d.ratio,
     }));
   }, [chartData]);
+
+  // Parameter sweep data - optimized for performance
+  const sweepData = useMemo(() => {
+    if (!showSweep) return { lines: [], combinedData: [] };
+    
+    const nLines = 8; // Reduced from 12 for better performance
+    const paramRanges: Record<string, { min: number; max: number; label: string }> = {
+      // Cosmological parameters
+      omega_m: { min: 0.2, max: 0.4, label: 'Ω_m' },
+      omega_b: { min: 0.03, max: 0.07, label: 'Ω_b' },
+      h: { min: 0.55, max: 0.8, label: 'h' },
+      n_s: { min: 0.85, max: 1.1, label: 'n_s' },
+      sigma8: { min: 0.6, max: 1.0, label: 'σ₈' },
+      // ShapeFit parameters
+      dm: { min: -0.3, max: 0.3, label: 'δm' },
+      dn: { min: -0.3, max: 0.3, label: 'δn' },
+      dA: { min: 0.7, max: 1.3, label: 'δA' },
+      deps: { min: -0.15, max: 0.15, label: 'δε' },
+      dgam: { min: -0.5, max: 0.5, label: 'δγ' },
+      dc: { min: -0.5, max: 0.5, label: 'δc' },
+    };
+    
+    const range = paramRanges[sweepParam];
+    if (!range) return { lines: [], combinedData: [] };
+    
+    const values = Array.from({ length: nLines }, (_, i) => 
+      range.min + (range.max - range.min) * i / (nLines - 1)
+    );
+    
+    const lines = values.map((val, idx) => ({
+      value: val,
+      label: range.label,
+      color: viridisColor(idx / (nLines - 1)),
+      dataKey: `line_${idx}`,
+    }));
+    
+    // Compute power spectrum once per parameter value (only 8 calls)
+    // Use linear only for sweep to improve performance
+    const results = values.map((val) => {
+      const testCosmo = sweepType === 'cosmo' ? { ...cosmo, [sweepParam]: val } : { ...cosmo };
+      const testShapefit = sweepType === 'shapefit' ? { ...shapefit, [sweepParam]: val } : { ...shapefit };
+      return computePowerSpectrum(testCosmo, testShapefit, redshift);
+    });
+    
+    // Build combined data array from pre-computed results
+    // Use a subset of k-points for better performance
+    const kGrid = results[0].k;
+    const stride = Math.max(1, Math.floor(kGrid.length / 100)); // Use ~100 points
+    const combinedData = [];
+    
+    for (let i = 0; i < kGrid.length; i += stride) {
+      const ki = kGrid[i];
+      const point: Record<string, number> = { k: ki };
+      
+      results.forEach((testResult, idx) => {
+        let y: number;
+        // Always use linear for sweep (much faster)
+        if (plotMode === 'pk') y = testResult.pk[i];
+        else if (plotMode === 'kpk') y = testResult.kPk[i];
+        else y = testResult.kPk3[i];
+        
+        point[`line_${idx}`] = y;
+      });
+      
+      combinedData.push(point);
+    }
+    
+    return { lines, combinedData };
+  }, [showSweep, sweepParam, sweepType, cosmo, shapefit, redshift, plotMode]);
+
+  // Compute ratio to fiducial (middle line) for sweep plot
+  const sweepRatioData = useMemo(() => {
+    if (!showSweep || sweepData.lines.length === 0) return { lines: [], combinedData: [] };
+    
+    // Use middle line as fiducial reference
+    const fiducialIdx = Math.floor(sweepData.lines.length / 2);
+    const fiducialKey = sweepData.lines[fiducialIdx].dataKey;
+    
+    const ratioData = sweepData.combinedData.map((point) => {
+      const ratioPoint: Record<string, number> = { k: point.k };
+      const fiducialValue = point[fiducialKey];
+      
+      sweepData.lines.forEach((line) => {
+        const value = point[line.dataKey];
+        ratioPoint[line.dataKey] = fiducialValue !== 0 ? value / fiducialValue : 1;
+      });
+      
+      return ratioPoint;
+    });
+    
+    return { lines: sweepData.lines, combinedData: ratioData };
+  }, [showSweep, sweepData]);
 
   const plotLabel = (useNonlinear ? 'Nonlinear ' : 'Linear ') + 
                     (plotMode === 'pk' ? 'P(k) [(Mpc/h)³]' :
@@ -374,13 +509,23 @@ export default function App() {
           </div>
 
           {/* Main Power Spectrum Plot */}
-          <div className="bg-gray-800 rounded-xl border border-gray-700 p-4 mb-4 shadow-xl">
+          <div id="main-pk-plot" className="bg-gray-800 rounded-xl border border-gray-700 p-4 mb-4 shadow-xl">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-semibold text-gray-300 flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-blue-500"></span>
                 Linear Matter Power Spectrum — {plotLabel}
                 {plotMode === 'kpk' && <span className="text-xs text-gray-500">(linear scales)</span>}
               </h3>
+              <button
+                onClick={() => downloadSVG('main-pk-plot', `power-spectrum-${plotMode}-${useNonlinear ? 'nonlinear' : 'linear'}.svg`)}
+                className="px-3 py-1.5 text-xs rounded-md bg-gray-700 hover:bg-gray-600 text-gray-300 transition-colors flex items-center gap-1"
+                title="Download as SVG"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                Download
+              </button>
             </div>
             <ResponsiveContainer width="100%" height={400}>
               <LineChart data={chartData} margin={{ top: 10, right: 30, left: 20, bottom: 20 }}>
@@ -417,12 +562,209 @@ export default function App() {
             </ResponsiveContainer>
           </div>
 
-          {/* Ratio Plot */}
+          {/* Parameter Sweep Panel */}
           <div className="bg-gray-800 rounded-xl border border-gray-700 p-4 mb-4 shadow-xl">
-            <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-red-500"></span>
-              Modification Ratio: P(k) / P_fid(k)
-            </h3>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-gray-300 flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
+                Parameter Sweep
+              </h3>
+              <button
+                onClick={() => setShowSweep(!showSweep)}
+                className={`px-3 py-1.5 text-xs rounded-md transition-colors ${
+                  showSweep ? 'bg-indigo-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
+                }`}
+              >
+                {showSweep ? 'Hide Sweep' : 'Show Sweep'}
+              </button>
+            </div>
+            
+            {showSweep && (
+              <>
+                <div className="flex flex-wrap gap-3 mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-400">Parameter type:</span>
+                    <select
+                      value={sweepType}
+                      onChange={(e) => {
+                        setSweepType(e.target.value as 'cosmo' | 'shapefit');
+                        setSweepParam(e.target.value === 'cosmo' ? 'omega_m' : 'dm');
+                      }}
+                      className="text-xs bg-gray-700 border border-gray-600 rounded px-2 py-1 text-gray-300"
+                    >
+                      <option value="cosmo">Cosmological</option>
+                      <option value="shapefit">ShapeFit</option>
+                    </select>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-400">Parameter:</span>
+                    <select
+                      value={sweepParam}
+                      onChange={(e) => setSweepParam(e.target.value)}
+                      className="text-xs bg-gray-700 border border-gray-600 rounded px-2 py-1 text-gray-300"
+                    >
+                      {sweepType === 'cosmo' ? (
+                        <>
+                          <option value="omega_m">Ω_m</option>
+                          <option value="omega_b">Ω_b</option>
+                          <option value="h">h</option>
+                          <option value="n_s">n_s</option>
+                          <option value="sigma8">σ₈</option>
+                        </>
+                      ) : (
+                        <>
+                          <option value="dm">δm</option>
+                          <option value="dn">δn</option>
+                          <option value="dA">δA</option>
+                          <option value="deps">δε</option>
+                          <option value="dgam">δγ</option>
+                          <option value="dc">δc</option>
+                        </>
+                      )}
+                    </select>
+                  </div>
+                </div>
+                
+                <div className="flex gap-4">
+                    <div className="flex-1">
+                      <div id="sweep-plot" className="relative">
+                        <ResponsiveContainer width="100%" height={350}>
+                          <LineChart data={sweepData.combinedData} margin={{ top: 10, right: 30, left: 20, bottom: 20 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+                            <XAxis
+                              dataKey="k"
+                              type="number"
+                              scale={plotMode === 'kpk' ? 'linear' : 'log'}
+                              domain={plotMode === 'kpk' ? [0.02, 0.3] : [0.005, 0.5]}
+                              ticks={plotMode === 'kpk' ? [0.02, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3] : [0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5]}
+                              tickFormatter={(v) => v.toString()}
+                              stroke="#6B7280"
+                              label={{ value: 'k [h/Mpc]', position: 'bottom', offset: 0, style: { fill: '#9CA3AF', fontSize: 12 } }}
+                            />
+                          <YAxis
+                            scale={plotMode === 'kpk' ? 'linear' : 'log'}
+                            domain={['auto', 'auto']}
+                            stroke="#6B7280"
+                            tickFormatter={plotMode === 'kpk' ? (v) => v.toFixed(1) : (v) => v.toExponential(1)}
+                            label={{ value: `${plotLabel} (linear)`, angle: -90, position: 'insideLeft', offset: -5, style: { fill: '#9CA3AF', fontSize: 11 } }}
+                          />                            <Tooltip
+                              contentStyle={{ backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '8px', fontSize: 12 }}
+                              labelFormatter={(v) => `k = ${(v as number).toFixed(4)} h/Mpc`}
+                              formatter={(value: number) => [plotMode === 'kpk' ? value.toFixed(2) : value.toExponential(3), '']}
+                            />
+                            {sweepData.lines.map((line, idx) => (
+                              <Line
+                                key={idx}
+                                dataKey={line.dataKey}
+                                stroke={line.color}
+                                strokeWidth={1.5}
+                                dot={false}
+                                name={`${line.label}=${line.value.toFixed(3)}`}
+                              />
+                            ))}
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                    
+                    {/* Colorbar */}
+                    <div className="flex flex-col items-center justify-center w-16">
+                      <div className="text-xs text-gray-400 mb-1 text-center">
+                        {sweepData.lines[0]?.label}
+                      </div>
+                      <div className="text-xs text-gray-300 mb-1">
+                        {sweepData.lines[sweepData.lines.length - 1]?.value.toFixed(2)}
+                      </div>
+                      <div 
+                        className="w-4 h-48 rounded"
+                        style={{
+                          background: `linear-gradient(to bottom, ${viridisColor(1)}, ${viridisColor(0.75)}, ${viridisColor(0.5)}, ${viridisColor(0.25)}, ${viridisColor(0)})`
+                        }}
+                      />
+                      <div className="text-xs text-gray-300 mt-1">
+                        {sweepData.lines[0]?.value.toFixed(2)}
+                      </div>
+                    </div>                </div>
+                
+                {/* Ratio to fiducial subpanel */}
+                <div className="mt-4 border-t border-gray-700 pt-4">
+                  <h4 className="text-xs font-semibold text-gray-400 mb-2">
+                    Ratio to fiducial (middle value)
+                  </h4>
+                  <ResponsiveContainer width="100%" height={200}>
+                    <LineChart data={sweepRatioData.combinedData} margin={{ top: 10, right: 30, left: 20, bottom: 20 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+                      <XAxis
+                        dataKey="k"
+                        type="number"
+                        scale={plotMode === 'kpk' ? 'linear' : 'log'}
+                        domain={plotMode === 'kpk' ? [0.02, 0.3] : [0.005, 0.5]}
+                        ticks={plotMode === 'kpk' ? [0.02, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3] : [0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5]}
+                        tickFormatter={(v) => v.toString()}
+                        stroke="#6B7280"
+                        label={{ value: 'k [h/Mpc]', position: 'bottom', offset: 0, style: { fill: '#9CA3AF', fontSize: 12 } }}
+                      />
+                      <YAxis
+                        scale="linear"
+                        domain={['auto', 'auto']}
+                        stroke="#6B7280"
+                        tickFormatter={(v) => v.toFixed(2)}
+                        label={{ value: 'Ratio to fiducial', angle: -90, position: 'insideLeft', offset: -5, style: { fill: '#9CA3AF', fontSize: 11 } }}
+                      />
+                      <Tooltip
+                        contentStyle={{ backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '8px', fontSize: 12 }}
+                        labelFormatter={(v) => `k = ${(v as number).toFixed(4)} h/Mpc`}
+                        formatter={(value: number) => [value.toFixed(3), '']}
+                      />
+                      <ReferenceLine y={1} stroke="#4B5563" strokeDasharray="3 3" strokeWidth={1} />
+                      {sweepRatioData.lines.map((line, idx) => (
+                        <Line
+                          key={idx}
+                          dataKey={line.dataKey}
+                          stroke={line.color}
+                          strokeWidth={1.5}
+                          dot={false}
+                          name={`${line.label}=${line.value.toFixed(3)}`}
+                        />
+                      ))}
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+                
+                <div className="mt-3 flex justify-end">
+                  <button
+                    onClick={() => downloadSVG('sweep-plot', `sweep-${sweepParam}-${plotMode}.svg`)}
+                    className="px-3 py-1.5 text-xs rounded-md bg-gray-700 hover:bg-gray-600 text-gray-300 transition-colors flex items-center gap-1"
+                    title="Download as SVG"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
+                    Download
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Ratio Plot */}
+          <div id="ratio-plot" className="bg-gray-800 rounded-xl border border-gray-700 p-4 mb-4 shadow-xl">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-gray-300 flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-red-500"></span>
+                Modification Ratio: P(k) / P_fid(k)
+              </h3>
+              <button
+                onClick={() => downloadSVG('ratio-plot', `ratio-${plotMode}.svg`)}
+                className="px-3 py-1.5 text-xs rounded-md bg-gray-700 hover:bg-gray-600 text-gray-300 transition-colors flex items-center gap-1"
+                title="Download as SVG"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                Download
+              </button>
+            </div>
             <ResponsiveContainer width="100%" height={250}>
               <LineChart data={ratioData} margin={{ top: 10, right: 30, left: 20, bottom: 20 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
@@ -454,10 +796,22 @@ export default function App() {
           </div>
 
           {/* Comparison Plots */}
-          <div className="bg-gray-800 rounded-xl border border-gray-700 p-4 shadow-xl">
-            <h3 className="text-sm font-semibold text-gray-300 mb-2">
-              Effect Comparison: Cosmological vs ShapeFit Modifications
-            </h3>
+          <div id="comparison-plots" className="bg-gray-800 rounded-xl border border-gray-700 p-4 shadow-xl">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-semibold text-gray-300">
+                Effect Comparison: Cosmological vs ShapeFit Modifications
+              </h3>
+              <button
+                onClick={() => downloadSVG('comparison-plots', `comparison-${plotMode}.svg`)}
+                className="px-3 py-1.5 text-xs rounded-md bg-gray-700 hover:bg-gray-600 text-gray-300 transition-colors flex items-center gap-1"
+                title="Download as SVG"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                Download
+              </button>
+            </div>
             <p className="text-xs text-gray-500 mb-4">
               Shows how the current parameter choices modify Δ²(k) relative to the Planck 2018 fiducial cosmology.
             </p>
