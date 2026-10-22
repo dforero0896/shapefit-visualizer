@@ -202,7 +202,7 @@ export default function App() {
 
   // Parameter sweep data
   const sweepData = useMemo(() => {
-    if (!showSweep) return [];
+    if (!showSweep) return { lines: [], combinedData: [] };
     
     const nLines = 12;
     const paramRanges: Record<string, { min: number; max: number; label: string }> = {
@@ -222,25 +222,41 @@ export default function App() {
     };
     
     const range = paramRanges[sweepParam];
-    if (!range) return [];
+    if (!range) return { lines: [], combinedData: [] };
     
     const values = Array.from({ length: nLines }, (_, i) => 
       range.min + (range.max - range.min) * i / (nLines - 1)
     );
     
-    return values.map((val, idx) => {
-      let testCosmo = { ...cosmo };
-      let testShapefit = { ...shapefit };
+    const lines = values.map((val, idx) => ({
+      value: val,
+      label: range.label,
+      color: viridisColor(idx / (nLines - 1)),
+      dataKey: `line_${idx}`,
+    }));
+    
+    // Create combined data array
+    const firstResult = computePowerSpectrum(
+      sweepType === 'cosmo' ? { ...cosmo, [sweepParam]: values[0] } : cosmo,
+      sweepType === 'shapefit' ? { ...shapefit, [sweepParam]: values[0] } : shapefit,
+      redshift
+    );
+    
+    const combinedData = firstResult.k.map((ki, i) => {
+      const point: any = { k: ki };
       
-      if (sweepType === 'cosmo') {
-        testCosmo = { ...cosmo, [sweepParam]: val };
-      } else {
-        testShapefit = { ...shapefit, [sweepParam]: val };
-      }
-      
-      const testResult = computePowerSpectrum(testCosmo, testShapefit, redshift);
-      
-      const data = testResult.k.map((ki, i) => {
+      values.forEach((val, idx) => {
+        let testCosmo = { ...cosmo };
+        let testShapefit = { ...shapefit };
+        
+        if (sweepType === 'cosmo') {
+          testCosmo = { ...cosmo, [sweepParam]: val };
+        } else {
+          testShapefit = { ...shapefit, [sweepParam]: val };
+        }
+        
+        const testResult = computePowerSpectrum(testCosmo, testShapefit, redshift);
+        
         let y: number;
         if (useNonlinear) {
           if (plotMode === 'pk') y = testResult.pk_nl[i];
@@ -251,16 +267,14 @@ export default function App() {
           else if (plotMode === 'kpk') y = testResult.kPk[i];
           else y = testResult.kPk3[i];
         }
-        return { k: ki, y };
+        
+        point[`line_${idx}`] = y;
       });
       
-      return {
-        value: val,
-        label: range.label,
-        color: viridisColor(idx / (nLines - 1)),
-        data,
-      };
+      return point;
     });
+    
+    return { lines, combinedData };
   }, [showSweep, sweepParam, sweepType, cosmo, shapefit, redshift, useNonlinear, plotMode]);
 
   const plotLabel = (useNonlinear ? 'Nonlinear ' : 'Linear ') + 
@@ -597,67 +611,66 @@ export default function App() {
                 </div>
                 
                 <div className="flex gap-4">
-                  <div className="flex-1">
-                    <div id="sweep-plot" className="relative">
-                      <ResponsiveContainer width="100%" height={350}>
-                        <LineChart margin={{ top: 10, right: 30, left: 20, bottom: 20 }}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
-                          <XAxis
-                            dataKey="k"
-                            scale={plotMode === 'kpk' ? 'linear' : 'log'}
-                            domain={plotMode === 'kpk' ? [0.02, 0.3] : [0.005, 0.5]}
-                            ticks={plotMode === 'kpk' ? [0.02, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3] : [0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5]}
-                            tickFormatter={(v) => v.toString()}
-                            stroke="#6B7280"
-                            label={{ value: 'k [h/Mpc]', position: 'bottom', offset: 0, style: { fill: '#9CA3AF', fontSize: 12 } }}
-                          />
-                          <YAxis
-                            scale={plotMode === 'kpk' ? 'linear' : 'log'}
-                            domain={['auto', 'auto']}
-                            stroke="#6B7280"
-                            tickFormatter={plotMode === 'kpk' ? (v) => v.toFixed(1) : (v) => v.toExponential(1)}
-                            label={{ value: plotLabel, angle: -90, position: 'insideLeft', offset: -5, style: { fill: '#9CA3AF', fontSize: 11 } }}
-                          />
-                          <Tooltip
-                            contentStyle={{ backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '8px', fontSize: 12 }}
-                            labelFormatter={(v) => `k = ${(v as number).toFixed(4)} h/Mpc`}
-                            formatter={(value: number) => [plotMode === 'kpk' ? value.toFixed(2) : value.toExponential(3), '']}
-                          />
-                          {sweepData.map((line, idx) => (
-                            <Line
-                              key={idx}
-                              data={line.data}
-                              dataKey="y"
-                              stroke={line.color}
-                              strokeWidth={1.5}
-                              dot={false}
-                              name={`${line.label}=${line.value.toFixed(3)}`}
+                    <div className="flex-1">
+                      <div id="sweep-plot" className="relative">
+                        <ResponsiveContainer width="100%" height={350}>
+                          <LineChart data={sweepData.combinedData} margin={{ top: 10, right: 30, left: 20, bottom: 20 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+                            <XAxis
+                              dataKey="k"
+                              type="number"
+                              scale={plotMode === 'kpk' ? 'linear' : 'log'}
+                              domain={plotMode === 'kpk' ? [0.02, 0.3] : [0.005, 0.5]}
+                              ticks={plotMode === 'kpk' ? [0.02, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3] : [0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5]}
+                              tickFormatter={(v) => v.toString()}
+                              stroke="#6B7280"
+                              label={{ value: 'k [h/Mpc]', position: 'bottom', offset: 0, style: { fill: '#9CA3AF', fontSize: 12 } }}
                             />
-                          ))}
-                        </LineChart>
-                      </ResponsiveContainer>
+                            <YAxis
+                              scale={plotMode === 'kpk' ? 'linear' : 'log'}
+                              domain={['auto', 'auto']}
+                              stroke="#6B7280"
+                              tickFormatter={plotMode === 'kpk' ? (v) => v.toFixed(1) : (v) => v.toExponential(1)}
+                              label={{ value: plotLabel, angle: -90, position: 'insideLeft', offset: -5, style: { fill: '#9CA3AF', fontSize: 11 } }}
+                            />
+                            <Tooltip
+                              contentStyle={{ backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '8px', fontSize: 12 }}
+                              labelFormatter={(v) => `k = ${(v as number).toFixed(4)} h/Mpc`}
+                              formatter={(value: number) => [plotMode === 'kpk' ? value.toFixed(2) : value.toExponential(3), '']}
+                            />
+                            {sweepData.lines.map((line, idx) => (
+                              <Line
+                                key={idx}
+                                dataKey={line.dataKey}
+                                stroke={line.color}
+                                strokeWidth={1.5}
+                                dot={false}
+                                name={`${line.label}=${line.value.toFixed(3)}`}
+                              />
+                            ))}
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
                     </div>
-                  </div>
-                  
-                  {/* Colorbar */}
-                  <div className="flex flex-col items-center justify-center w-16">
-                    <div className="text-xs text-gray-400 mb-1 text-center">
-                      {sweepData[0]?.label}
-                    </div>
-                    <div className="text-xs text-gray-300 mb-1">
-                      {sweepData[sweepData.length - 1]?.value.toFixed(2)}
-                    </div>
-                    <div 
-                      className="w-4 h-48 rounded"
-                      style={{
-                        background: `linear-gradient(to bottom, ${viridisColor(1)}, ${viridisColor(0.75)}, ${viridisColor(0.5)}, ${viridisColor(0.25)}, ${viridisColor(0)})`
-                      }}
-                    />
-                    <div className="text-xs text-gray-300 mt-1">
-                      {sweepData[0]?.value.toFixed(2)}
-                    </div>
-                  </div>
-                </div>
+                    
+                    {/* Colorbar */}
+                    <div className="flex flex-col items-center justify-center w-16">
+                      <div className="text-xs text-gray-400 mb-1 text-center">
+                        {sweepData.lines[0]?.label}
+                      </div>
+                      <div className="text-xs text-gray-300 mb-1">
+                        {sweepData.lines[sweepData.lines.length - 1]?.value.toFixed(2)}
+                      </div>
+                      <div 
+                        className="w-4 h-48 rounded"
+                        style={{
+                          background: `linear-gradient(to bottom, ${viridisColor(1)}, ${viridisColor(0.75)}, ${viridisColor(0.5)}, ${viridisColor(0.25)}, ${viridisColor(0)})`
+                        }}
+                      />
+                      <div className="text-xs text-gray-300 mt-1">
+                        {sweepData.lines[0]?.value.toFixed(2)}
+                      </div>
+                    </div>                </div>
                 
                 <div className="mt-3 flex justify-end">
                   <button
