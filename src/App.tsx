@@ -269,6 +269,29 @@ export default function App() {
     return { lines, combinedData };
   }, [showSweep, sweepParam, sweepType, cosmo, shapefit, redshift, plotMode]);
 
+  // Compute ratio to fiducial (middle line) for sweep plot
+  const sweepRatioData = useMemo(() => {
+    if (!showSweep || sweepData.lines.length === 0) return { lines: [], combinedData: [] };
+    
+    // Use middle line as fiducial reference
+    const fiducialIdx = Math.floor(sweepData.lines.length / 2);
+    const fiducialKey = sweepData.lines[fiducialIdx].dataKey;
+    
+    const ratioData = sweepData.combinedData.map((point) => {
+      const ratioPoint: Record<string, number> = { k: point.k };
+      const fiducialValue = point[fiducialKey];
+      
+      sweepData.lines.forEach((line) => {
+        const value = point[line.dataKey];
+        ratioPoint[line.dataKey] = fiducialValue !== 0 ? value / fiducialValue : 1;
+      });
+      
+      return ratioPoint;
+    });
+    
+    return { lines: sweepData.lines, combinedData: ratioData };
+  }, [showSweep, sweepData]);
+
   const plotLabel = (useNonlinear ? 'Nonlinear ' : 'Linear ') + 
                     (plotMode === 'pk' ? 'P(k) [(Mpc/h)³]' :
                      plotMode === 'kpk' ? 'k·P(k) [(Mpc/h)²]' :
@@ -662,6 +685,51 @@ export default function App() {
                         {sweepData.lines[0]?.value.toFixed(2)}
                       </div>
                     </div>                </div>
+                
+                {/* Ratio to fiducial subpanel */}
+                <div className="mt-4 border-t border-gray-700 pt-4">
+                  <h4 className="text-xs font-semibold text-gray-400 mb-2">
+                    Ratio to fiducial (middle value)
+                  </h4>
+                  <ResponsiveContainer width="100%" height={200}>
+                    <LineChart data={sweepRatioData.combinedData} margin={{ top: 10, right: 30, left: 20, bottom: 20 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+                      <XAxis
+                        dataKey="k"
+                        type="number"
+                        scale={plotMode === 'kpk' ? 'linear' : 'log'}
+                        domain={plotMode === 'kpk' ? [0.02, 0.3] : [0.005, 0.5]}
+                        ticks={plotMode === 'kpk' ? [0.02, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3] : [0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5]}
+                        tickFormatter={(v) => v.toString()}
+                        stroke="#6B7280"
+                        label={{ value: 'k [h/Mpc]', position: 'bottom', offset: 0, style: { fill: '#9CA3AF', fontSize: 12 } }}
+                      />
+                      <YAxis
+                        scale="linear"
+                        domain={['auto', 'auto']}
+                        stroke="#6B7280"
+                        tickFormatter={(v) => v.toFixed(2)}
+                        label={{ value: 'Ratio to fiducial', angle: -90, position: 'insideLeft', offset: -5, style: { fill: '#9CA3AF', fontSize: 11 } }}
+                      />
+                      <Tooltip
+                        contentStyle={{ backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '8px', fontSize: 12 }}
+                        labelFormatter={(v) => `k = ${(v as number).toFixed(4)} h/Mpc`}
+                        formatter={(value: number) => [value.toFixed(3), '']}
+                      />
+                      <ReferenceLine y={1} stroke="#4B5563" strokeDasharray="3 3" strokeWidth={1} />
+                      {sweepRatioData.lines.map((line, idx) => (
+                        <Line
+                          key={idx}
+                          dataKey={line.dataKey}
+                          stroke={line.color}
+                          strokeWidth={1.5}
+                          dot={false}
+                          name={`${line.label}=${line.value.toFixed(3)}`}
+                        />
+                      ))}
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
                 
                 <div className="mt-3 flex justify-end">
                   <button
