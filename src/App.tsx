@@ -200,11 +200,11 @@ export default function App() {
     }));
   }, [chartData]);
 
-  // Parameter sweep data
+  // Parameter sweep data - optimized for performance
   const sweepData = useMemo(() => {
     if (!showSweep) return { lines: [], combinedData: [] };
     
-    const nLines = 12;
+    const nLines = 8; // Reduced from 12 for better performance
     const paramRanges: Record<string, { min: number; max: number; label: string }> = {
       // Cosmological parameters
       omega_m: { min: 0.2, max: 0.4, label: 'Ω_m' },
@@ -235,47 +235,39 @@ export default function App() {
       dataKey: `line_${idx}`,
     }));
     
-    // Create combined data array
-    const firstResult = computePowerSpectrum(
-      sweepType === 'cosmo' ? { ...cosmo, [sweepParam]: values[0] } : cosmo,
-      sweepType === 'shapefit' ? { ...shapefit, [sweepParam]: values[0] } : shapefit,
-      redshift
-    );
+    // Compute power spectrum once per parameter value (only 8 calls)
+    // Use linear only for sweep to improve performance
+    const results = values.map((val) => {
+      const testCosmo = sweepType === 'cosmo' ? { ...cosmo, [sweepParam]: val } : { ...cosmo };
+      const testShapefit = sweepType === 'shapefit' ? { ...shapefit, [sweepParam]: val } : { ...shapefit };
+      return computePowerSpectrum(testCosmo, testShapefit, redshift);
+    });
     
-    const combinedData = firstResult.k.map((ki, i) => {
-      const point: any = { k: ki };
+    // Build combined data array from pre-computed results
+    // Use a subset of k-points for better performance
+    const kGrid = results[0].k;
+    const stride = Math.max(1, Math.floor(kGrid.length / 100)); // Use ~100 points
+    const combinedData = [];
+    
+    for (let i = 0; i < kGrid.length; i += stride) {
+      const ki = kGrid[i];
+      const point: Record<string, number> = { k: ki };
       
-      values.forEach((val, idx) => {
-        let testCosmo = { ...cosmo };
-        let testShapefit = { ...shapefit };
-        
-        if (sweepType === 'cosmo') {
-          testCosmo = { ...cosmo, [sweepParam]: val };
-        } else {
-          testShapefit = { ...shapefit, [sweepParam]: val };
-        }
-        
-        const testResult = computePowerSpectrum(testCosmo, testShapefit, redshift);
-        
+      results.forEach((testResult, idx) => {
         let y: number;
-        if (useNonlinear) {
-          if (plotMode === 'pk') y = testResult.pk_nl[i];
-          else if (plotMode === 'kpk') y = testResult.kPk_nl[i];
-          else y = testResult.kPk3_nl[i];
-        } else {
-          if (plotMode === 'pk') y = testResult.pk[i];
-          else if (plotMode === 'kpk') y = testResult.kPk[i];
-          else y = testResult.kPk3[i];
-        }
+        // Always use linear for sweep (much faster)
+        if (plotMode === 'pk') y = testResult.pk[i];
+        else if (plotMode === 'kpk') y = testResult.kPk[i];
+        else y = testResult.kPk3[i];
         
         point[`line_${idx}`] = y;
       });
       
-      return point;
-    });
+      combinedData.push(point);
+    }
     
     return { lines, combinedData };
-  }, [showSweep, sweepParam, sweepType, cosmo, shapefit, redshift, useNonlinear, plotMode]);
+  }, [showSweep, sweepParam, sweepType, cosmo, shapefit, redshift, plotMode]);
 
   const plotLabel = (useNonlinear ? 'Nonlinear ' : 'Linear ') + 
                     (plotMode === 'pk' ? 'P(k) [(Mpc/h)³]' :
@@ -626,14 +618,13 @@ export default function App() {
                               stroke="#6B7280"
                               label={{ value: 'k [h/Mpc]', position: 'bottom', offset: 0, style: { fill: '#9CA3AF', fontSize: 12 } }}
                             />
-                            <YAxis
-                              scale={plotMode === 'kpk' ? 'linear' : 'log'}
-                              domain={['auto', 'auto']}
-                              stroke="#6B7280"
-                              tickFormatter={plotMode === 'kpk' ? (v) => v.toFixed(1) : (v) => v.toExponential(1)}
-                              label={{ value: plotLabel, angle: -90, position: 'insideLeft', offset: -5, style: { fill: '#9CA3AF', fontSize: 11 } }}
-                            />
-                            <Tooltip
+                          <YAxis
+                            scale={plotMode === 'kpk' ? 'linear' : 'log'}
+                            domain={['auto', 'auto']}
+                            stroke="#6B7280"
+                            tickFormatter={plotMode === 'kpk' ? (v) => v.toFixed(1) : (v) => v.toExponential(1)}
+                            label={{ value: `${plotLabel} (linear)`, angle: -90, position: 'insideLeft', offset: -5, style: { fill: '#9CA3AF', fontSize: 11 } }}
+                          />                            <Tooltip
                               contentStyle={{ backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '8px', fontSize: 12 }}
                               labelFormatter={(v) => `k = ${(v as number).toFixed(4)} h/Mpc`}
                               formatter={(value: number) => [plotMode === 'kpk' ? value.toFixed(2) : value.toExponential(3), '']}
